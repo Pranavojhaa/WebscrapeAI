@@ -3,7 +3,6 @@ from bs4 import BeautifulSoup
 from scraper import scrape_table, scrape_headings, scrape_images, scrape_links, scrape_paragraphs, scrape_quotes
 from soup import fetch_page
 from exporter import export_table, export_text_data, export_links, export_images
-from analyzer import start_chat_with_data, dataframe_to_markdown, summarize_paragraphs
 
 
 def fetch_count(soup):
@@ -142,6 +141,12 @@ def inspect_element(soup):
                 export_links(last_selected_data)
 
         elif processing == '3':
+            try:
+                from analyzer import start_chat_with_data, dataframe_to_markdown, summarize_paragraphs
+            except ImportError as exc:
+                print(f"❌ AI analysis is unavailable: {exc}")
+                continue
+
             data_to_analyze = ""
             if check == 1 and table_df is not None:
                 data_to_analyze = dataframe_to_markdown(table_df)
