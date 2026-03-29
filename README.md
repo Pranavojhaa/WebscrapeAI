@@ -48,6 +48,27 @@ Launch the web app:
 python3 src/app.py
 ```
 
+## Deploy To Railway
+
+This repo now includes [railway.json](/Users/pranavojha/AutoScrapeAI/railway.json) with a production start command and health check.
+
+1. Push the latest code to GitHub.
+2. In Railway, create a new project from the GitHub repo.
+3. Railway should detect the Python app automatically and install from `requirements.txt`.
+4. The app will start with:
+
+```bash
+gunicorn --bind 0.0.0.0:$PORT src.app:app
+```
+
+5. After the first deploy, open the generated Railway domain.
+
+Health check endpoint:
+
+```text
+/health
+```
+
 Run the CLI version:
 
 ```bash
@@ -58,6 +79,7 @@ python3 src/main.py
 
 - If Selenium is not installed or unavailable, the app still loads and continues with standard HTTP scraping.
 - Some pages may still require a working ChromeDriver setup for dynamic rendering.
+- Railway deployment will work best for the static scraping path. Dynamic Selenium rendering may need extra browser setup if you want it in production.
 - Exported artifacts and debug HTML may be generated in the project root during use.
 
 ## Next Nice Upgrades
