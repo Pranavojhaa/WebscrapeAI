@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoScrapeAI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <main class="page">
+        <section class="hero">
+            <p class="eyebrow">AutoScrapeAI</p>
+            <h1>Basic web scraping frontend</h1>
+            <p class="intro">
+                Paste a page URL, choose what you want to inspect, and view a simple summary of the content.
+            </p>
+        </section>
+
+        <section class="card">
+            <form method="post" class="form-grid">
+                <div class="field field-wide">
+                    <label for="url">Website URL</label>
+                    <input
+                        id="url"
+                        name="url"
+                        type="text"
+                        placeholder="example.com"
+                        value="{{ url }}"
+                    >
+                </div>
+
+                <div class="field">
+                    <label for="element">Inspect</label>
+                    <select id="element" name="element">
+                        {% for value, label in element_options.items() %}
+                            <option value="{{ value }}" {% if value == selected_element %}selected{% endif %}>
+                                {{ label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label for="table_index">Table number</label>
+                    <input
+                        id="table_index"
+                        name="table_index"
+                        type="number"
+                        min="1"
+                        value="{{ table_index }}"
+                    >
+                </div>
+
+                <div class="field field-wide">
+                    <button type="submit">Inspect Page</button>
+                </div>
+            </form>
+
+            {% if error %}
+                <div class="message error">{{ error }}</div>
+            {% endif %}
+        </section>
+
+        {% if summary %}
+            <section class="card">
+                <h2>Page Summary</h2>
+                <div class="stats">
+                    {% for key, value in summary.items() %}
+                        <article class="stat">
+                            <span class="stat-label">{{ key }}</span>
+                            <strong class="stat-value">{{ value }}</strong>
+                        </article>
+                    {% endfor %}
+                </div>
+            </section>
+        {% endif %}
+
+        {% if result %}
+            <section class="card">
+                <h2>{{ result.label }} Results</h2>
+                <p class="result-count">Items found: {{ result.count }}</p>
+
+                {% if result.kind == "table" %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    {% for header in result.headers %}
+                                        <th>{{ header }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in result.rows %}
+                                    <tr>
+                                        {% for cell in row %}
+                                            <td>{{ cell }}</td>
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% elif result.kind == "links" %}
+                    <ul class="result-list">
+                        {% for item in result.items %}
+                            <li>
+                                <span>{{ item.text or "Untitled link" }}</span>
+                                <a href="{{ item.href }}" target="_blank" rel="noreferrer">{{ item.href }}</a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% elif result.kind == "list" %}
+                    <ul class="result-list">
+                        {% for item in result.items %}
+                            <li>{{ item.content }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>No results were found for this selection.</p>
+                {% endif %}
+            </section>
+        {% endif %}
+    </main>
+</body>
+</html>

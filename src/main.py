@@ -1,35 +1,39 @@
-from smart_scrapper import get_soup,validate_soup
-from inspector import fetch_page, inspect_element
+from smart_scrapper import get_soup
+from inspector import inspect_element, fetch_count
+
 
 def main():
     print("🌐 Welcome to WebScrapeAI!")
     print("This tool lets you inspect, scrape, and analyze data from any webpage.\n")
 
     url = input("🔗 Enter the URL of the website you want to scrape: ").strip()
+    if not url:
+        print("❌ URL cannot be empty. Exiting.")
+        return
     if not url.startswith("http"):
         url = "https://" + url
 
+    # Step 1: Fetch soup using the smart scraper
+    # The get_soup function now handles static/dynamic fetching and validation internally.
     soup = get_soup(url)
-    validation = validate_soup(soup, url)
 
-    if validation == "retry":
-        print("\n🔁 Retrying with Selenium...")
-        soup = get_soup(url)  # this will trigger the Selenium path
-        validation = validate_soup(soup, url)
-
-    if validation is False:
-        print("❌ Page is not suitable for scraping. Exiting.")
+    if not soup:
+        print("❌ Failed to fetch the page or content is insufficient. Please check the URL and try again.")
         return
-    # Show what elements are available
-    data = fetch_page(url)
+    
+    print("\n✅ Scraping Completed!")
+
+    # Step 2: Count elements
+    data = fetch_count(soup)
     print("\n🔍 Elements detected on page:")
     for index, (key, value) in enumerate(data.items()):
-        print(f"{index}: {key} → {value}")
+        print(f"{index}: {key.capitalize()} → {value}")
 
-    # Hand control to interactive inspector
-    inspect_element(url)
+    # Step 3: Inspect elements
+    inspect_element(soup)
 
     print("\n👋 Exiting WebScrapeAI. Thanks for scraping!")
+
 
 if __name__ == "__main__":
     main()

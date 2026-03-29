@@ -1,43 +1,40 @@
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd 
+import pandas as pd
+from soup import fetch_page
 
-def scrape_table(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    table = soup.find_all('table')
-    if table == None: 
-        print ("No Tables in the response.url")
+def scrape_table(soup):
+    tables = soup.find_all('table')
+    if not tables:
+        print("No tables found.")
         return None
-    table_no = int(input(f"Enter the table you want to check from 1 to {len(table)}: "))
-    if table[table_no-1]:
-        header = table[table_no-1].find_all('th')
-        headers = [th.text.strip() for th in header]
-        rows = table[table_no-1].find_all('tr')
-        data = []
-        for row in rows[1:]:
-            cols = row.find_all('td')
-            data.append([col.text.strip() for col in cols])
-        
-        df = pd.DataFrame(data, columns=headers)
-        return df
-    else:
-        print("The selected table number does not exist")
 
-def scrape_paragraphs(url):
-    soup = BeautifulSoup(requests.get(url).text, 'html.parser')
+    table_no = int(input(f"Enter the table you want to check from 1 to {len(tables)}: "))
+    selected_table = tables[table_no - 1]
+
+    rows = selected_table.find_all('tr')
+    data = []
+
+    for row in rows:
+        cols = [td.text.strip() for td in row.find_all(['td', 'th'])]
+        if len(cols) > 0:
+            data.append(cols)
+
+    df = pd.DataFrame(data)
+    return df
+
+
+
+def scrape_paragraphs(soup):
     return [p.text.strip() for p in soup.find_all('p')]
 
-def scrape_headings(url):
-    soup = BeautifulSoup(requests.get(url).text, 'html.parser')
+def scrape_headings(soup):
     return [h.text.strip() for h in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])]
 
-def scrape_images(url):
-    soup = BeautifulSoup(requests.get(url).text, 'html.parser')
+def scrape_images(soup):
     return [img['src'] for img in soup.find_all('img') if 'src' in img.attrs]
 
-def scrape_links(url):
-    soup = BeautifulSoup(requests.get(url).text, 'html.parser')
+def scrape_links(soup):
     links = [{'text': a.text.strip(), 'href': a['href']} for a in soup.find_all('a') if 'href' in a.attrs]
 
     for index, link in enumerate(links):
@@ -45,6 +42,12 @@ def scrape_links(url):
     
     return links
 
+def scrape_quotes(soup):
+    quotes = soup.find_all("div", class_="quote")
+    return [
+        f'{q.find("span", class_="text").text.strip()} — {q.find("small", class_="author").text.strip()}'
+        for q in quotes
+    ]
 
 
 
@@ -52,6 +55,7 @@ def scrape_links(url):
 if __name__ == "__main__":
     url = "https://en.wikipedia.org/wiki/List_of_largest_companies_in_the_United_States_by_revenue"
     print(f"\n🌐 Scraping URL: {url}")
+    url = fetch_page(url)
 
     print("\n🧾 Scraping Tables...")
     df = scrape_table(url)
@@ -85,4 +89,4 @@ if __name__ == "__main__":
     print("\n🔗 Sample Links:")
     for link in links[:5]:
         print(f"- {link['text']}: {link['href']}")
-print("\n✅ Scraping Completed!")
+    print("\n✅ Scraping Completed!")
