@@ -1,5 +1,8 @@
-import requests
+import os
+import shutil
+
 from bs4 import BeautifulSoup
+from network import MAX_RESPONSE_BYTES, fetch_public_html
 
 try:
     from selenium import webdriver
@@ -8,6 +11,7 @@ try:
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException
     SELENIUM_AVAILABLE = True
 except ImportError:
     webdriver = None
@@ -15,13 +19,22 @@ except ImportError:
     Service = None
     WebDriverWait = None
     EC = None
+    TimeoutException = Exception
     SELENIUM_AVAILABLE = False
 
     class By:
         CLASS_NAME = "class name"
         TAG_NAME = "tag name"
 
-CHROMEDRIVER_PATH = "/Users/pranavojha/AutoScrapeAI/src/chromedriver"
+CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH") or shutil.which("chromedriver")
+def dynamic_rendering_enabled():
+    return (
+        os.getenv("ENABLE_SELENIUM", "false").strip().lower() in {"1", "true", "yes"}
+        # Fail closed like app.is_production(): the browser has no per-request address checks,
+        # so it only runs where the person submitting URLs is the person running it.
+        and os.getenv("APP_ENV", "").strip().lower() == "development"
+        and not os.getenv("RAILWAY_ENVIRONMENT")
+    )
 
 class SmartScraper:
     """
@@ -41,42 +54,47 @@ class SmartScraper:
 
     def _get_static_soup(self):
         """Fetches and parses content using a static request."""
-        print("📄 Using static requests + BeautifulSoup...")
-        try:
-            response = requests.get(self.url, timeout=10)
-            response.raise_for_status()
-            return BeautifulSoup(response.content, 'html.parser')
-        except requests.RequestException as e:
-            print(f"❌ Failed to fetch static content: {e}")
-            return None
+        content, _ = fetch_public_html(self.url)
+        return BeautifulSoup(content, "html.parser")
 
     def _get_dynamic_soup(self):
         """Fetches and parses content using Selenium for JS rendering."""
-        print("⚙️ Using Selenium to render full page (dynamic content)...")
+        if not dynamic_rendering_enabled():
+            return None
         if not SELENIUM_AVAILABLE:
-            print("⚠️ Selenium is not installed. Skipping dynamic rendering.")
             return None
 
         options = Options()
-        options.headless = True
+        options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        chrome_binary_path = os.getenv("CHROME_BIN")
+        if chrome_binary_path:
+            options.binary_location = chrome_binary_path
 
-        service = Service(CHROMEDRIVER_PATH)
+        service = Service(CHROMEDRIVER_PATH) if CHROMEDRIVER_PATH else None
         driver = None
         try:
-            driver = webdriver.Chrome(service=service, options=options)
+            if service:
+                driver = webdriver.Chrome(service=service, options=options)
+            else:
+                driver = webdriver.Chrome(options=options)
+            driver.set_page_load_timeout(20)
             driver.get(self.url)
-            
-            # Wait for any of the key content selectors to appear
-            wait_conditions = [EC.presence_of_element_located(s) for s in self.CONTENT_SELECTORS]
-            WebDriverWait(driver, 15).until(EC.any_of(*wait_conditions))
-            
-            print("✅ JS content loaded successfully.")
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            try:
+                WebDriverWait(driver, 10).until(
+                    lambda current_driver: self._is_content_sufficient(
+                        BeautifulSoup(current_driver.page_source, "html.parser")
+                    )
+                )
+            except TimeoutException:
+                pass
             html = driver.page_source
+            if len(html.encode("utf-8")) > MAX_RESPONSE_BYTES:
+                return None
             return BeautifulSoup(html, 'html.parser')
-        except Exception as e:
-            print(f"⚠️ Timeout or error waiting for dynamic content: {e}")
+        except Exception:
             return None
         finally:
             if driver:
@@ -96,16 +114,12 @@ class SmartScraper:
         return has_content_tag and text_size > 1000
 
     def _clean_soup(self, soup):
-        """Removes script/style tags and saves a debug file."""
+        """Removes non-content tags from the parsed document."""
         if not soup:
             return None
         for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
             tag.decompose()
         
-        # Optional: save HTML for debugging
-        with open("soup_debug.html", "w", encoding="utf-8") as f:
-            f.write(soup.prettify())
-        print("🔎 Dumped cleaned soup to soup_debug.html")
         return soup
 
     def get_soup(self):
@@ -115,13 +129,11 @@ class SmartScraper:
         soup = self._get_static_soup()
 
         if not self._is_content_sufficient(soup):
-            print(f"\n⚠️ WARNING: The page at {self.url} appears to have minimal content.")
-            print("   Retrying with Selenium for dynamic content.")
             dynamic_soup = self._get_dynamic_soup()
             if dynamic_soup:
                 soup = dynamic_soup
             else:
-                print("ℹ️ Proceeding with the best available content.")
+                pass
 
         return self._clean_soup(soup)
 
