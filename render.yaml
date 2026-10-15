@@ -1,0 +1,69 @@
+projects:
+  - name: webscrapeai
+    environments:
+      - name: demo
+        networking:
+          isolation: enabled
+        services:
+          - type: web
+            name: webscrapeai-demo
+            runtime: python
+            region: singapore
+            plan: 0.5c-512mb
+            autoDeployTrigger: checksPass
+            buildCommand: pip install --require-hashes -r requirements-demo.txt
+            startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 40 src.demo_app:app
+            healthCheckPath: /health
+            envVars:
+              - key: APP_ENV
+                value: production
+              - key: APP_MODE
+                value: demo
+              - key: PYTHON_VERSION
+                value: 3.12.11
+
+      - name: private
+        networking:
+          isolation: enabled
+        services:
+          - type: web
+            name: webscrapeai-private
+            runtime: python
+            region: singapore
+            plan: 0.5c-512mb
+            autoDeployTrigger: checksPass
+            buildCommand: pip install --require-hashes -r requirements.txt
+            startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 40 src.app:app
+            healthCheckPath: /health
+            envVars:
+              - key: APP_ENV
+                value: production
+              - key: APP_MODE
+                value: private
+              - key: APP_SECRET_KEY
+                generateValue: true
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: webscrapeai-private-db
+                  property: connectionString
+              - key: BOOTSTRAP_ADMIN_EMAIL
+                sync: false
+              - key: BOOTSTRAP_ADMIN_PASSWORD
+                sync: false
+              - key: OPENAI_API_KEY
+                sync: false
+              - key: OPENAI_MODEL
+                value: gpt-5-mini
+              - key: ENABLE_SELENIUM
+                value: "false"
+              - key: TRUSTED_PROXY_HOPS
+                value: "0"
+              - key: PYTHON_VERSION
+                value: 3.12.11
+        databases:
+          - name: webscrapeai-private-db
+            databaseName: webscrapeai
+            user: webscrapeai
+            region: singapore
+            plan: 0.1c-256mb
+            ipAllowList: []

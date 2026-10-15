@@ -1,8 +1,10 @@
 __pycache__/
 .env
+*.sqlite3
 *.pyc
 .ipynb_checkpoints/
 venv/
+.venv/
 **/chromedriver
 .DS_Store
 exported_table.csv
