@@ -58,7 +58,6 @@ class DynamicBrowserIntegrationTests(unittest.TestCase):
             {
                 "ENABLE_SELENIUM": "true",
                 "APP_ENV": "development",
-                "RAILWAY_ENVIRONMENT": "",
             },
         ):
             soup = SmartScraper(url)._get_dynamic_soup()
