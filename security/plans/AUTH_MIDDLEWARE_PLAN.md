@@ -2,22 +2,21 @@
 
 ## Changes
 
-- `src/app.py` — `is_production()` now returns true unless `APP_ENV=development`; new `secrets_match()` compares UTF-8 bytes and is used for both credentials (joined with `&`).
-- `README.md` — deployment paragraph updated to describe the fail-closed behaviour.
-
-## New files
-
-- `tests/test_security.py` — `test_unset_app_env_fails_closed`, `test_non_ascii_basic_auth_is_rejected_not_crashed`.
+- `src/app.py` — replaced shared HTTP Basic credentials with private-mode sessions, CSRF-protected login/logout, active-account checks, and admin-only account management.
+- `src/account_store.py` — added SQLite local testing and PostgreSQL production storage with hashed passwords.
+- `src/demo_app.py` — separated the public cache-only demo from private scraping and AI routes.
+- `render.yaml` — separated demo and private environments and enabled network isolation.
 
 ## Verification goals
 
-- [x] With no `APP_ENV`, `/` returns 503 until credentials are configured (test)
-- [x] Unauthenticated request in production returns 401 (existing test)
-- [x] Non-ASCII Basic credentials return 401, not 500 (test)
-- [x] Auth runs in `before_request`, before any handler
-- [x] No admin routes exist
+- [x] Missing production database or app secret fails closed.
+- [x] Unauthenticated production requests redirect to `/login`.
+- [x] Inactive users cannot access private routes.
+- [x] Login, logout, and account changes require CSRF tokens.
+- [x] Non-admin accounts cannot access user administration.
+- [ ] Verify authentication and proxy/cookie behavior on Render staging.
 
-## Manual verification (for the human)
+## Manual verification
 
-- **Behaviour change:** `python src/app.py` with no `APP_ENV` now returns 503. Use `APP_ENV=development python src/app.py`, as the README already says.
-- After deploying, confirm the Railway URL prompts for credentials and `/health` returns 200.
+- Keep the private service internet-reachable for approved users, but protect app routes with account login.
+- Confirm the demo URL cannot reach private service routes, credentials, or the database.

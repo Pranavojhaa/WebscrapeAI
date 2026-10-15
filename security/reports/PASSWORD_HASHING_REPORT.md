@@ -1,19 +1,25 @@
 # PASSWORD_HASHING Security Report
 
-## Status: N/A
+## Status: Implemented; hosted verification pending
 
 ## Findings
 
-The app stores no passwords. The single production credential lives in the `APP_PASSWORD` environment variable and is compared in constant time. No MD5, SHA-1 or SHA-256 is used on passwords anywhere.
+`src/account_store.py` stores password hashes created and verified with Werkzeug's password-hashing helpers. Raw passwords are not stored. The bootstrap admin and admin-created member passwords must be at least 16 characters. Password verification succeeds only for active accounts.
 
 ## What's at risk
 
-Anyone who can read the Railway environment can read the password, as with any deploy secret.
+- Operators who can read the Render environment can read the bootstrap password until it is removed after first-admin initialization.
+- Admins distribute a member's initial password out of band. Members cannot change or reset it in the current UI.
+- Password hash settings inherit from the pinned Werkzeug dependency; the algorithm should be re-reviewed when that dependency is upgraded.
 
 ## What's already secure
 
-Constant-time comparison; minimum length of 16 enforced.
+- Per-password salted hashes are used rather than reversible encryption or plaintext.
+- Passwords are never returned by account listing or templates.
+- The production bootstrap and OpenAI values are set as private-service environment secrets, not source or GitHub variables.
 
 ## Recommendations
 
-If user accounts are ever added, use Argon2 or bcrypt.
+1. Remove `BOOTSTRAP_ADMIN_PASSWORD` after the first admin can sign in.
+2. Add password rotation/reset before inviting more users.
+3. Re-run password-hashing review whenever Werkzeug is upgraded.

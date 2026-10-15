@@ -4,7 +4,7 @@
 
 ## Findings
 
-The frontend is one server-rendered template (`src/templates/index.html`) and one stylesheet. There is no JavaScript, no bundler, no public-prefixed env vars and no source maps. The OpenAI call is made server-side in `src/analyzer.py`; the key never reaches a response. The template receives only `ai_enabled` as a boolean. Live scan: no same-origin scripts found.
+The private frontend uses server-rendered templates and a stylesheet; the demo additionally loads `src/static/demo.js` to select cached examples. There is no bundler, public-prefixed env vars, or source maps. The OpenAI call is server-side in `src/analyzer.py`; the key never reaches a response. The private template receives only `ai_enabled` as a boolean. The demo entry point does not import the analyzer and its dependency lock excludes the AI client.
 
 ## What's at risk
 

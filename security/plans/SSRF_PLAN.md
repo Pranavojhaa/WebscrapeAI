@@ -19,4 +19,4 @@
 ## Manual verification (for the human)
 
 - The pinning relies on urllib3 internals (`_new_conn`, `_dns_host`), verified on urllib3 2.8.0. `urllib3` is not pinned in `requirements.txt`; the two tests above will fail if an upgrade changes those internals.
-- Decide whether to add egress restrictions at the network layer on Railway.
+- Add outbound destination restrictions at the network layer on the selected host or an egress proxy.

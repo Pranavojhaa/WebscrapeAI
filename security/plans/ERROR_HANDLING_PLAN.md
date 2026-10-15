@@ -19,4 +19,4 @@ None.
 
 ## Manual verification (for the human)
 
-- Check the `Server` header on the Railway URL.
+- Check the `Server` header on each deployed app URL.

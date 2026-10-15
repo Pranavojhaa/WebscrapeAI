@@ -1,19 +1,21 @@
 # SQL_INJECTION Security Report
 
-## Status: N/A
+## Status: No injection found in current account-store queries; hosted verification pending
 
 ## Findings
 
-No database and no SQL anywhere in the codebase.
+The private account store now uses SQLite locally and PostgreSQL in production. SQL statements are fixed strings and user-provided email values are bound parameters. The only dialect adaptation changes static `%s` placeholders to SQLite `?` placeholders; input values are not interpolated into SQL.
 
 ## What's at risk
 
-Nothing.
+The database has not been provisioned or tested on Render. Future query changes must preserve parameter binding.
 
 ## What's already secure
 
-Not applicable.
+- Login, account creation, account listing, and enable/disable operations use parameterized statements.
+- The public demo does not open a database connection.
 
 ## Recommendations
 
-None.
+1. Keep user-provided values parameterized.
+2. Run the account-store tests on every change and exercise PostgreSQL behavior in staging.

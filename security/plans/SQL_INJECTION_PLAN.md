@@ -2,16 +2,14 @@
 
 ## Changes
 
-None.
-
-## New files
-
-None.
+- Add database-backed account operations with parameterized SQL for SQLite and PostgreSQL.
 
 ## Verification goals
 
-- [x] Not applicable; nothing to verify.
+- [x] No user-controlled strings are interpolated into SQL.
+- [x] Account-store regression tests cover authentication and lifecycle operations.
+- [ ] Exercise PostgreSQL queries in Render staging.
 
-## Manual verification (for the human)
+## Manual verification
 
-- Re-audit this category if the feature is ever added.
+- Preserve parameter binding for any future database query.

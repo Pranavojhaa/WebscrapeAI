@@ -1,83 +1,95 @@
 # WebScrapeAI
 
-A small Flask app and interactive CLI for inspecting public HTML pages. It extracts headings, paragraphs, images, links, quotes, and tables; the web app can export extracted data and optionally request a short AI analysis.
+A Flask app and CLI for extracting headings, paragraphs, images, links, quotes, and tables from public HTML pages. The private app can export results and optionally request an AI analysis. The separate public demo uses only bundled sample data.
 
-## Requirements
+## Two hosted apps
 
-- Python 3.11 or newer
-- A public HTTP/HTTPS page to inspect
-- An OpenAI API key only if you want AI analysis
-- A local Chrome/Chromium installation only if you explicitly enable Selenium rendering
+`render.yaml` defines two independent Render web services and a private Postgres database for private accounts. Each web service gets its own Render URL and service-scoped environment variables. Both services and the database are pinned to Singapore and Python 3.12.11; the database accepts only internal Render connections.
+
+- **Public demo (`src.demo_app:app`, `APP_MODE=demo`)**: a curated sidebar of ten cached page snapshots: Harvard CS50 AI, six AI-related Wikipedia pages, and three OpenAI developer pages. Selecting a sample fills a chat-style prompt; submitting it renders captured page-element counts, headings, related links, and a static overview. These snapshots were fetched from the linked sources on 2026-10-15. This separate entry point has no arbitrary URL field, makes no outbound scrape requests, imports no scraper or AI code, has no user database, and fails closed if private credentials are configured. Its minimal dependency lock excludes the AI client. Results are curated previews, not complete copies, and do not update when source pages change.
+- **Private workspace (`APP_MODE=private`)**: an invite-only login for the owner and approved users. The first admin is bootstrapped from `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`; admins create and disable member accounts at `/admin/users`. Passwords are stored as Werkzeug password hashes. There is no public signup. The private service alone receives the Postgres URL and optional `OPENAI_API_KEY`.
+
+The private service must remain a public Render web service protected by the app's login, not a Render Private Service: approved users need to reach the sign-in page from their devices over the internet. Its URL is publicly reachable, but scraping and AI routes require an active account. The public demo and private workspace use separate Render environments with network isolation; the Postgres allowlist is empty, so only the private environment can reach it. Network isolation blocks private Render network traffic between environments; it does not block public internet access. The private app can still reach public scrape targets, while the demo app has no runtime fetch code. Render requires a Pro workspace for this isolation feature.
+
+The Blueprint selects always-on paid service plans and a paid Postgres plan so the demo avoids free-tier sleep and the private account database does not expire. As of 2026-10-15, budget about $45/month before database storage, usage, or tax: the $25 Pro workspace, two $7 Starter web services, and $6 Basic-256MB Postgres. Recheck Render's displayed total before provisioning; this Blueprint does not create resources by itself.
+
+## Render setup
+
+1. Connect the repository to Render and create a Blueprint using `render.yaml`.
+2. Review the services and database, the plans and costs shown by Render, and the branch selected before provisioning. This file does not create or deploy resources by itself.
+3. Set the prompted private-service values: the first admin's email, a unique password of at least 16 characters, and the OpenAI key if AI is wanted. Render generates a separate `APP_SECRET_KEY` for the private service; the demo receives no API, database, or application secret.
+4. After confirming that the first admin can sign in, remove `BOOTSTRAP_ADMIN_PASSWORD` from the private service's environment; the initialized database retains the account and its password hash.
+5. Keep Selenium disabled. Verify the forwarded client-IP behavior before changing `TRUSTED_PROXY_HOPS` from `0`.
+6. After provisioning, test both URLs separately: the demo should list ten samples and return cached data without external requests; the private URL should redirect to sign-in, allow only active accounts, support account disablement, and run scraping/AI only in the private service.
+
+## Main branch protection
+
+Recommended `main` defaults: require pull requests, one approval, resolved review conversations, and all CI results: `unit-tests (3.11)`, `unit-tests (3.12)`, `dependency-audit`, and `browser-smoke`. Dismiss stale approvals after new commits, block force-pushes/deletion, and apply protections to administrators. Browser smoke runs on pull requests so it can be required rather than silently skipped. Recheck the exact status-check names in GitHub before saving the rule; this recommendation does not configure GitHub settings.
+
+Render's outbound static IPs identify the private service to other systems; they are not destination-egress restrictions. Environment isolation does not restrict public outbound connections. Static scraping has application-level public-IP checks, revalidates redirects, and pins resolved addresses at connection time. Keep Selenium off in hosted environments because browser rendering has a broader network surface. Add network-level egress controls if the hosting architecture supports them before allowing untrusted or broader access.
+
+The deployment blueprint omits `OPENAI_API_KEY` and `DATABASE_URL` from the demo and links `DATABASE_URL` only to the private service. Do not copy private environment variables between services. Keep all real values in Render's environment settings, never in `.env.example`, source, or GitHub.
 
 ## Local setup
+
+- Python 3.11 or newer
+- A public HTTP/HTTPS page to inspect in private mode
+- An OpenAI API key only if you want AI analysis
+- A local Chrome/Chromium installation only if you explicitly enable Selenium for local development
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-APP_ENV=development python src/app.py
+cp .env.example .env
+APP_ENV=development APP_MODE=private python src/app.py
 ```
 
-Open `http://127.0.0.1:5000`. The CLI is available with:
+Open `http://127.0.0.1:5000`. Explicit development mode bypasses login and binds to localhost; do not use it on a public host. The CLI is available with:
 
 ```bash
 python src/main.py
 ```
 
-AI analysis is opt-in and sends the selected extraction to OpenAI only when the user clicks **Analyse with AI**. Configure it in the server environment (or an untracked `.env` file locally):
+To run only the read-only demo locally, use `APP_ENV=production APP_MODE=demo python -m src.demo_app`. No database or secret is required for demo mode; it serves locally at `http://127.0.0.1:5001`.
 
-```text
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5-mini
-```
+## AI and scraping safeguards
 
-Never commit `.env` or place a key in source code. The analysis input is truncated to 12,000 characters.
+AI analysis is opt-in and sends the selected extraction to OpenAI only when a signed-in private user chooses **Analyse with AI**. The analysis input is truncated to 12,000 characters. Configure `OPENAI_API_KEY` and, optionally, `OPENAI_MODEL` in the private service only.
 
-## Dynamic rendering
+Static HTTP inspection is the default. Dynamic rendering is limited to explicit local development (`ENABLE_SELENIUM=true` and `APP_ENV=development`); it is disabled in both hosted modes. Static fetches allow only standard HTTP/HTTPS ports, block non-public IP addresses, revalidate each redirect, pin DNS resolution to the connection, cap responses at 5 MB, and use timeouts. These are application-layer safeguards, not a substitute for network controls if the service later handles untrusted users or broader workloads.
 
-Static HTTP inspection is the default. Install `requirements-selenium.txt` and set both `ENABLE_SELENIUM=true` and `APP_ENV=development` for local use (rendering is off for any other `APP_ENV`, including an unset one); it then uses `CHROME_BIN` and `CHROMEDRIVER_PATH` if set, otherwise Selenium Manager. The renderer waits up to 10 seconds for meaningful page content, then falls back to the static response if it remains sparse. A local JavaScript-fixture browser smoke test is included; verify a compatible browser/driver on any host before enabling rendering there.
+The in-memory limits are 10 failed logins per email/source key per 15 minutes, 30 form submissions per minute per authenticated account (or source address before login), and 20 AI analyses per hour per account. They reset on restart and are not shared between scaled instances; use a shared limiter before scaling or widening access.
 
-Do not enable browser rendering on an internet-facing service without a separate browser sandbox and outbound network restrictions. A webpage can cause the browser to request other network resources, so the URL checks used by static fetching are not a substitute for browser isolation.
-
-## Deployment
-
-Railway uses `railway.json`, installs the locked runtime dependencies from `requirements.txt`, and starts Gunicorn.
-
-`requirements.txt` and `requirements-selenium.txt` are generated lock files: every package, including transitive ones, is pinned with hashes, so pip installs exactly what was audited. Edit the direct dependencies in `requirements.in` or `requirements-selenium.in`, then regenerate with the command in the lock file's header (`uv pip compile ... --universal --python-version 3.11 --generate-hashes`). `/health` is a liveness check, not a readiness check for AI or Selenium. Authentication is required unless `APP_ENV=development` is set explicitly, so a host with no `APP_ENV` fails closed (503 until credentials are configured); local development uses `APP_ENV=development` and binds only to `127.0.0.1`.
-
-Before exposing the app publicly, complete these operational controls:
-
-1. Set strong `APP_USERNAME`, `APP_PASSWORD`, and `APP_SECRET_KEY` values. Railway deployments fail closed (503 health) until all three are configured; the browser uses HTTP Basic authentication and form posts require a CSRF token.
-2. The app limits each client to 10 failed logins per 15 minutes, 30 form posts per minute and 20 AI analyses per hour (429 with `Retry-After`; IPv6 clients are grouped per /64). The counters are in memory per Gunicorn worker, so with 2 workers the effective ceiling is up to double and resets on restart. On Railway the client address is taken from the last `X-Forwarded-For` entry; confirm after deploying that two clients get separate limits. A shared limiter or WAF in front is still worth adding for anything beyond light use.
-3. Enforce outbound destination restrictions through a controlled egress proxy or network layer; application URL validation cannot fully prevent DNS rebinding. Railway Static Outbound IPs provide stable source addresses for allowlisting, not destination filtering.
-4. Keep Selenium disabled in production; it is deliberately unavailable in Railway/production mode until it runs in an isolated worker with restricted egress.
-5. Set `OPENAI_API_KEY` only if AI analysis is intended, and configure billing/usage limits with the provider.
-6. Test the deployed service, health route, exports, AI configuration, and restart behavior in the target Railway project.
-
-Use a password of at least 16 characters and an `APP_SECRET_KEY` of at least 32 characters. Generate the latter with `python -c 'import secrets; print(secrets.token_urlsafe(48))'`; store it as a Railway secret, not in the repository.
-
-The app blocks non-public resolved IP addresses, follows only revalidated HTTP(S) redirects, limits fetched pages to 5 MB, and uses request timeouts. These are useful safeguards, not a replacement for network-level egress controls.
-
-Do not expose the web app publicly until the egress controls above are in place. The safe interim release is the local CLI (`python src/main.py`).
+`/health` is a public liveness route. It does not verify AI configuration or database readiness. The private service returns a configuration error on other routes if its secret, PostgreSQL connection, or first-admin bootstrap is missing.
 
 ## CI and release gates
 
-GitHub Actions runs on pushes and pull requests. The required checks should be:
+GitHub Actions runs on pushes and pull requests. Recommended required check results for `main` are:
 
-- `unit-tests (3.11)` and `unit-tests (3.12)`: install runtime and pinned CI tools, run Ruff's undefined/unused-name checks, the unit suite, and Python byte-compilation.
-- `dependency-audit`: scan both the runtime and optional Selenium dependency sets for known vulnerabilities.
+- `unit-tests (3.11)`
+- `unit-tests (3.12)`
+- `dependency-audit`
+- `browser-smoke`
 
-In the GitHub repository's branch protection or ruleset settings, require pull requests and all three checks above before merging to the default branch. This workflow does not deploy the app. The Selenium browser smoke test runs only on a scheduled or manually dispatched workflow; it uses a local JavaScript fixture, not an arbitrary external website.
+Also require pull requests, one approval, and resolved review conversations before merging. If no independent reviewer is available, decide explicitly whether to allow zero approvals for solo PRs. The current workflow does not deploy the app; browser smoke tests a local fixture on pull requests, scheduled runs, and manual dispatch.
 
-A staging-to-production release is not configured yet. Before public release, configure GitHub `staging` and `production` environments, require a human reviewer for production, add a staging deploy and smoke-test job, then make the production deploy depend on staging success and the environment approval. Keep the current safe CLI-only fallback until restricted outbound egress is enforced for the hosted web app.
+## Dependencies and checks
 
-Run the local checks with:
+`requirements.txt`, `requirements-demo.txt`, and `requirements-selenium.txt` are generated hash-locked files. Edit direct dependencies in the corresponding `.in` file, then regenerate with:
+
+```bash
+uv pip compile requirements.in --universal --python-version 3.11 --generate-hashes -o requirements.txt
+uv pip compile requirements-demo.in --universal --python-version 3.11 --generate-hashes -o requirements-demo.txt
+```
+
+Run checks locally with:
 
 ```bash
 python -m pip install -r .github/requirements-ci.txt
 ruff check --select F src tests
 python -m unittest discover -s tests -v
 python -m compileall -q src tests
-pip-audit -r requirements.txt -r requirements-selenium.txt
+pip-audit -r requirements.txt -r requirements-selenium.txt -r requirements-demo.txt
 ```

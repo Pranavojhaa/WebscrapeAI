@@ -15,4 +15,4 @@ None.
 
 ## Manual verification (for the human)
 
-- Run the scanner against the Railway URL.
+- Run the scanner against each deployed app URL.

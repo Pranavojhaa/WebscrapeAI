@@ -20,4 +20,4 @@ None to existing files.
 ## Manual verification (for the human)
 
 - Run `gitleaks detect --source . --verbose`.
-- Run the scanner against the Railway URL once deployed.
+- Run the scanner against each deployed app URL.

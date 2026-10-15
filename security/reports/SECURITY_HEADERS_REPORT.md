@@ -4,7 +4,7 @@
 
 ## Findings
 
-Headers are set by one global `after_request` hook in `src/app.py`. There is no hosting header config (`railway.json` has none).
+Headers are set by one global `after_request` hook in `src/app.py`. Host-level header configuration has not been set up.
 
 Live scan before the fix:
 - **FAIL** — CSP had no `object-src 'none'`: `default-src 'self'; style-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
@@ -15,7 +15,7 @@ The rest of the CSP is sound: `default-src 'self'`, no `unsafe-inline` or `unsaf
 
 ## What's at risk
 
-Low in practice, since the page has no scripts and escapes all output. HSTS matters most: without it a first visit over plain HTTP can be intercepted and the Basic credentials captured.
+Low in practice, since the templates escape output. HSTS protects the first connection from downgrade interception; production authentication uses secure session cookies.
 
 ## What's already secure
 

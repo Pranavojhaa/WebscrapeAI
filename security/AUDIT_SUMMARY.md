@@ -4,6 +4,16 @@ Date: 2026-10-13
 Branch: `security-review` (changes uncommitted)
 Target scanned: local dev server at `http://127.0.0.1:5057`. No deployed URL was scanned, so host-level results (HSTS delivery, edge headers, CORS added by the host) are unverified.
 
+## Architecture change: 2026-10-15
+
+This audit predates the account-based deployment work on `shippy/github-deployment-2026-10-13`. The app now has a separate public cache-only demo and a private account-based service with PostgreSQL storage, session login, admin-managed accounts, and isolated Render environments. Render network isolation requires a Pro workspace; the current always-on configuration is estimated at about $45/month before storage, bandwidth overages, and tax. Relevant category reports and plans have been revised, but the historical scan totals below are not a current release sign-off. No Render services or database have been provisioned; authentication, database reachability, proxy headers, cookies, rate limits, and billing remain to be verified before deployment.
+
+The public demo bundles ten snapshots captured from the selected public pages on 2026-10-15. It displays captured full-page element counts and curated headings, related links, and summaries. It does not make network requests, invoke the scraper, or call AI at runtime; snapshots can become stale as source pages change.
+
+Local deployment-branch verification on 2026-10-15: 58 tests passed and one scheduled browser-integration test was skipped; Ruff, byte-compilation, all three dependency audits, YAML parsing, and `git diff --check` passed. These checks do not substitute for a remote CI run on this unpushed branch or live Render verification.
+
+The prior table and findings are retained as the historical `security-review` audit baseline; do not apply its N/A statuses or single-credential conclusions to the current deployment branch.
+
 ## Results
 
 | # | Category | Status | Report | Plan |
@@ -44,7 +54,7 @@ None.
 - Authentication now fails closed: required unless `APP_ENV=development`.
 - DNS rebinding closed: the address that is checked is the address connected to.
 - Total fetch time capped at 30 seconds.
-- Non-ASCII CSRF token or Basic credentials return 400/401 where they caused a 500.
+- Non-ASCII CSRF tokens return 400 rather than causing a 500.
 - CSP gains `object-src 'none'`; `X-Frame-Options: DENY` added; HSTS sent in production.
 - Scraped links render as anchors only for http(s); CSV and XLSX exports neutralize formula cells.
 - Library exception text no longer reaches the page.
@@ -56,25 +66,25 @@ Follow-up on 2026-10-15:
 - Lock files: `requirements.txt` and `requirements-selenium.txt` are now hashed, fully pinned locks generated from `.in` files; all 52 pinned versions are clear in OSV.
 - Selenium: rendering requires `APP_ENV=development` explicitly, matching the fail-closed auth.
 
-Tests: `tests/test_security.py` adds 14 regression tests, all passing. The full suite runs 46 tests with 1 error and 1 skip; the error is `test_analyzer.AnalyzerTests.test_cli_chat_sends_each_question_once`, which failed the same way before these changes because it needs `OPENAI_API_KEY` in the environment.
+Tests: historical; run the current deployment branch suite before treating this audit as release validation.
 
 ## Still open
 
-- Rate limits are per Gunicorn worker and in memory, so the ceiling is up to 2x and resets on deploy. Whether Railway's `X-Forwarded-For` gives each client its own bucket is unverified until deployed.
+- Rate limits are per Gunicorn worker and in memory, so limits multiply across workers and reset on deploy. Client identity behind the selected host's proxy remains unverified until deployment.
 - Selenium has no per-request address checks inside the browser; it is now development-only. Running it in production would need a filtering egress proxy.
-- CI has not run against the new lock files.
+- GitHub Actions has not been confirmed for the current unpushed branch; local verification passed.
 
 ## Tools not run
 
 - `gitleaks`: not installed (`brew install gitleaks`). History was checked by regex only.
-- `pip-audit`: not installed locally. Installed packages were checked against OSV directly.
+- `pip-audit` passed for the runtime, Selenium, and public-demo lock files on 2026-10-15.
 - `semgrep`: not installed (`brew install semgrep`).
 
 ## Remaining manual verification
 
-- Run `python3 ~/.claude/skills/vibe-check/scripts/check.py <railway-url>` after deploying; confirm HSTS, the `Server` header, CORS and the `Secure` cookie flag.
-- Confirm the Railway URL prompts for credentials and `/health` returns 200.
+- Run `python3 ~/.claude/skills/vibe-check/scripts/check.py <deployed-url>` after deploying; confirm HSTS, the `Server` header, CORS and the `Secure` cookie flag.
+- Confirm the private app URL shows account login and `/health` returns 200.
 - Start local runs with `APP_ENV=development`; without it the app now returns 503.
-- Set an OpenAI usage limit and use a randomly generated `APP_PASSWORD`.
+- Set an OpenAI usage limit and use unique administrator/member passwords.
 - Decide whether formula neutralization in exports is acceptable for your data.
 - After deploying, check that two different networks get separate rate limits (see `plans/RATE_LIMITING_PLAN.md`).

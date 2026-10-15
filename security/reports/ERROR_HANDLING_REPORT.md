@@ -8,7 +8,7 @@
 - Unexpected exceptions in the inspect flow are logged server-side and shown as a generic message.
 - **LOW — library exception text shown to users.** `except (IndexError, ValueError) as exc: page_data["error"] = str(exc)` also caught `requests` exceptions that subclass `ValueError` (`InvalidURL`, `InvalidSchema`, `MissingSchema`) and displayed their text.
 - **LOW — malformed `Content-Length`.** `int(content_length)` in `src/network.py` raised `ValueError` on a non-numeric header from the remote server, and that text was shown too.
-- **WARN (scan) — `Server: Werkzeug/3.1.9 Python/3.14.7`.** This comes from the Flask development server. Production runs Gunicorn, which sends its own header; what Railway serves was not checked.
+- **WARN (scan) — `Server: Werkzeug/3.1.9 Python/3.14.7`.** This comes from the Flask development server. Production runs Gunicorn, which sends its own header; the selected host's response has not been checked.
 
 ## What's at risk
 

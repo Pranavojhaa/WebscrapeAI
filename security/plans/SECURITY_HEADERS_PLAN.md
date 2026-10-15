@@ -18,5 +18,5 @@
 
 ## Manual verification (for the human)
 
-- Run the scanner against the Railway URL. Local results cannot show what Railway's edge adds or strips.
+- Run the scanner against each deployed URL. Local results cannot show what the host's edge adds or strips.
 - Only add `preload` if every subdomain is HTTPS-only.

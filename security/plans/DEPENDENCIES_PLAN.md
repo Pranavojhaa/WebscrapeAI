@@ -22,4 +22,4 @@
 ## Manual verification (for the human)
 
 - To change a dependency, edit the `.in` file, run the command in the lock file's header, and commit both files. `uv` is needed for this (`pip install uv` or `brew install uv`).
-- Watch the first Railway build to confirm it installs from the lock without errors.
+- Watch the first hosted build to confirm it installs from the lock without errors.
