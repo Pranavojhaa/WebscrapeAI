@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Try WebScrapeAI with preloaded example pages. The public demo never fetches websites or calls AI services.">
+    <title>WebScrapeAI · Public Demo</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="{{ url_for('static', filename='demo.js') }}" defer></script>
+</head>
+<body class="demo-body">
+    <div class="demo-shell">
+        <aside class="demo-sidebar" aria-label="Demo website list">
+            <a class="demo-brand" href="/" aria-label="WebScrapeAI demo home">
+                <span class="brand-mark" aria-hidden="true">W</span>
+                <span>WebScrape<span>AI</span></span>
+            </a>
+            <p class="sidebar-label">TRY A SAMPLE</p>
+            <nav class="demo-sites" aria-label="Choose a preloaded website">
+                {% for site in sites %}
+                    <button
+                        class="demo-site {% if site.id == selected_site.id %}is-selected{% endif %}"
+                        type="button"
+                        data-site-id="{{ site.id }}"
+                        data-prompt="{{ site.prompt }}"
+                        aria-pressed="{{ 'true' if site.id == selected_site.id else 'false' }}"
+                    >
+                        <span class="site-dot" aria-hidden="true"></span>
+                        <span class="site-copy">
+                            <span class="site-name">{{ site.name }}</span>
+                            <span class="site-category">{{ site.category }}</span>
+                        </span>
+                    </button>
+                {% endfor %}
+            </nav>
+            <div class="sidebar-note">
+                <span class="status-dot" aria-hidden="true"></span>
+                <p>Preloaded examples<br><strong>No live requests · No AI</strong></p>
+            </div>
+        </aside>
+
+        <main class="demo-main">
+            <header class="demo-topbar">
+                <div>
+                    <p class="eyebrow">PUBLIC DEMO</p>
+                    <h1>Explore a sample scrape</h1>
+                </div>
+                <span class="demo-badge"><span aria-hidden="true">●</span> Cached mode</span>
+            </header>
+
+            <div class="demo-content">
+                <section class="demo-intro">
+                    <p>Choose a website on the left. Its sample scrape prompt is ready to run.</p>
+                    <p class="demo-safety">This public demo displays preloaded examples only. It does not visit the selected website, accept arbitrary URLs, or use AI.</p>
+                </section>
+
+                <section class="demo-chat" aria-label="Demo scrape conversation">
+                    <div class="chat-message user-message">
+                        <span class="message-avatar" aria-hidden="true">P</span>
+                        <div>
+                            <p class="message-label">YOUR REQUEST</p>
+                            <form method="post" action="/" class="demo-run-form">
+                                <input id="demo-site-id" type="hidden" name="site_id" value="{{ selected_site.id }}">
+                                <p id="demo-prompt" class="prompt-text" aria-live="polite">{{ selected_site.prompt }}</p>
+                                <button class="run-demo-button" type="submit">Run sample <span aria-hidden="true">↗</span></button>
+                            </form>
+                        </div>
+                    </div>
+
+                    {% if error %}
+                        <div class="message error" role="alert">{{ error }}</div>
+                    {% endif %}
+
+                    {% if result %}
+                        <article class="chat-message assistant-message" aria-labelledby="result-heading">
+                            <span class="message-avatar ai-avatar" aria-hidden="true">W</span>
+                            <div class="assistant-result">
+                                <p class="message-label">CACHED SCRAPE RESULT · CAPTURED {{ result.snapshot_date }}</p>
+                                <h2 id="result-heading">{{ result.name }}</h2>
+                                <a class="source-link" href="{{ result.url }}" target="_blank" rel="noopener noreferrer">{{ result.url }} <span aria-hidden="true">↗</span></a>
+                                <p class="result-summary">{{ result.summary }}</p>
+                                <div class="demo-stats" aria-label="Sample result counts">
+                                    <div><strong>{{ result.counts.headings }}</strong><span>Headings</span></div>
+                                    <div><strong>{{ result.counts.paragraphs }}</strong><span>Paragraphs</span></div>
+                                    <div><strong>{{ result.counts.links }}</strong><span>Links</span></div>
+                                    <div><strong>{{ result.counts.images }}</strong><span>Images</span></div>
+                                    <div><strong>{{ result.counts.tables }}</strong><span>Tables</span></div>
+                                </div>
+                                <h3>Heading preview</h3>
+                                <ul class="heading-chips">
+                                    {% for heading in result.headings %}<li>{{ heading }}</li>{% endfor %}
+                                </ul>
+                                <h3>At a glance</h3>
+                                <div class="scraped-sections">
+                                    {% for section in result.sections %}
+                                        <section>
+                                            <h4>{{ section.title }}</h4>
+                                            <p>{{ section.text }}</p>
+                                        </section>
+                                    {% endfor %}
+                                </div>
+                                <h3>Related pages</h3>
+                                <ul class="related-links">
+                                    {% for link in result.links %}
+                                        <li><a href="{{ link.href }}" target="_blank" rel="noopener noreferrer">{{ link.text }} <span aria-hidden="true">↗</span></a></li>
+                                    {% endfor %}
+                                </ul>
+                                <p class="snapshot-note">Counts come from the captured page HTML. Headings and related pages are a curated preview; this offline demo never fetches the source page or calls AI.</p>
+                            </div>
+                        </article>
+                    {% else %}
+                        <div class="empty-demo">
+                            <span class="empty-spark" aria-hidden="true">✳</span>
+                            <p>Your sample result will appear here</p>
+                            <span>Pick a site, then run its preloaded example.</span>
+                        </div>
+                    {% endif %}
+                </section>
+                <footer class="demo-footer">WebScrapeAI public demo <span>·</span> Snapshots captured 15 October 2026; source pages are linked above and may have changed.</footer>
+            </div>
+        </main>
+    </div>
+</body>
+</html>
