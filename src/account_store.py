@@ -1,6 +1,7 @@
 import sqlite3
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -61,6 +62,10 @@ class AccountStore:
             statement = statement.replace("%s", "?")
         return cursor.execute(statement, parameters)
 
+    def _timestamp_parameter(self, value: datetime) -> datetime | str:
+        value = value.replace(tzinfo=None)
+        return value.isoformat(sep=" ") if self._is_sqlite else value
+
     def initialize(self, bootstrap_email: str = "", bootstrap_password: str = "") -> None:
         if self._initialized:
             return
@@ -76,9 +81,11 @@ class AccountStore:
                             password_hash TEXT NOT NULL,
                             is_admin BOOLEAN NOT NULL DEFAULT FALSE,
                             is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                            session_version INTEGER NOT NULL DEFAULT 0,
                             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                         )"""
                     )
+                    self._apply_schema_migrations(cursor)
                     self._execute(cursor, "SELECT COUNT(*) AS user_count FROM users")
                     user_count = cursor.fetchone()["user_count"]
                     if user_count == 0:
@@ -96,13 +103,68 @@ class AccountStore:
                 finally:
                     cursor.close()
 
+    def _apply_schema_migrations(self, cursor) -> None:
+        if not self._is_sqlite:
+            cursor.execute("SELECT pg_advisory_xact_lock(739184201)")
+        cursor.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+        self._execute(
+            cursor,
+            "INSERT INTO schema_migrations (version, name) VALUES (%s, %s) ON CONFLICT (version) DO NOTHING",
+            (1, "existing users table baseline"),
+        )
+        self._execute(cursor, "SELECT version FROM schema_migrations")
+        applied = {row["version"] for row in cursor.fetchall()}
+
+        if 2 not in applied:
+            if self._is_sqlite:
+                cursor.execute("PRAGMA table_info(users)")
+                columns = {row["name"] for row in cursor.fetchall()}
+                if "session_version" not in columns:
+                    cursor.execute(
+                        "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0"
+                    )
+            else:
+                cursor.execute(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0"
+                )
+            self._execute(
+                cursor,
+                "INSERT INTO schema_migrations (version, name) VALUES (%s, %s) ON CONFLICT (version) DO NOTHING",
+                (2, "revoke sessions after password changes"),
+            )
+
+        if 3 not in applied:
+            cursor.execute(
+                """CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+                    expires_at TIMESTAMP NOT NULL
+                )"""
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS password_reset_tokens_email_idx ON password_reset_tokens (email)"
+            )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS password_reset_tokens_email_uq ON password_reset_tokens (email)"
+            )
+            self._execute(
+                cursor,
+                "INSERT INTO schema_migrations (version, name) VALUES (%s, %s) ON CONFLICT (version) DO NOTHING",
+                (3, "single-use password reset tokens"),
+            )
     def get_user(self, email: str):
         with self._connection() as connection:
             cursor = connection.cursor()
             try:
                 self._execute(
                     cursor,
-                    "SELECT email, password_hash, is_admin, is_active, created_at FROM users WHERE email = %s",
+                    "SELECT email, password_hash, is_admin, is_active, session_version, created_at FROM users WHERE email = %s",
                     (email.strip().lower(),),
                 )
                 row = cursor.fetchone()
@@ -113,6 +175,7 @@ class AccountStore:
                     "password_hash": row["password_hash"],
                     "is_admin": bool(row["is_admin"]),
                     "is_active": bool(row["is_active"]),
+                    "session_version": int(row["session_version"]),
                     "created_at": row["created_at"],
                 }
             finally:
@@ -123,6 +186,70 @@ class AccountStore:
         if user and user["is_active"] and check_password_hash(user["password_hash"], password):
             return user
         return None
+
+    def issue_password_reset(self, email: str, token_hash: str, expires_at: datetime) -> bool:
+        email = email.strip().lower()
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            try:
+                self._execute(
+                    cursor,
+                    "DELETE FROM password_reset_tokens WHERE expires_at <= %s",
+                    (self._timestamp_parameter(datetime.now(timezone.utc)),),
+                )
+                self._execute(cursor, "SELECT is_active FROM users WHERE email = %s", (email,))
+                user = cursor.fetchone()
+                if user is None or not user["is_active"]:
+                    return False
+                self._execute(
+                    cursor,
+                    "INSERT INTO password_reset_tokens (token_hash, email, expires_at) VALUES (%s, %s, %s) ON CONFLICT (email) DO UPDATE SET token_hash = EXCLUDED.token_hash, expires_at = EXCLUDED.expires_at",
+                    (token_hash, email, self._timestamp_parameter(expires_at)),
+                )
+                return True
+            finally:
+                cursor.close()
+
+    def delete_password_reset_token(self, token_hash: str) -> None:
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            try:
+                self._execute(
+                    cursor,
+                    "DELETE FROM password_reset_tokens WHERE token_hash = %s",
+                    (token_hash,),
+                )
+            finally:
+                cursor.close()
+
+    def consume_password_reset(self, token_hash: str, password: str, now: datetime | None = None) -> bool:
+        if len(password) < 16 or len(password) > 1024:
+            raise AccountStoreError("Choose a password between 16 and 1024 characters.")
+        current_time = self._timestamp_parameter(now or datetime.now(timezone.utc))
+        password_hash = generate_password_hash(password)
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            try:
+                self._execute(
+                    cursor,
+                    "DELETE FROM password_reset_tokens WHERE token_hash = %s AND expires_at > %s RETURNING email",
+                    (token_hash, current_time),
+                )
+                token = cursor.fetchone()
+                if token is None:
+                    return False
+                email = token["email"]
+                self._execute(
+                    cursor,
+                    "UPDATE users SET password_hash = %s, session_version = session_version + 1 WHERE email = %s AND is_active = %s",
+                    (password_hash, email, True),
+                )
+                if cursor.rowcount != 1:
+                    return False
+                self._execute(cursor, "DELETE FROM password_reset_tokens WHERE email = %s", (email,))
+                return True
+            finally:
+                cursor.close()
 
     def list_users(self):
         with self._connection() as connection:

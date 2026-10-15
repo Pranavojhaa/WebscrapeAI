@@ -22,7 +22,14 @@ class SecurityRegressionTests(unittest.TestCase):
         self.environment_patch.start()
         web_app.app.config.update(TESTING=True)
         web_app.account_stores.clear()
-        for limiter in (web_app.auth_failure_limiter, web_app.post_limiter, web_app.analysis_limiter):
+        for limiter in (
+            web_app.auth_failure_limiter,
+            web_app.login_request_limiter,
+            web_app.password_reset_ip_limiter,
+            web_app.password_reset_email_limiter,
+            web_app.post_limiter,
+            web_app.analysis_limiter,
+        ):
             limiter.hits.clear()
         self.client = web_app.app.test_client()
         page = self.client.get("/").data

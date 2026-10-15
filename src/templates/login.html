@@ -16,6 +16,7 @@
         <h1>Sign in</h1>
         <p class="intro">Use an account created by your WebScrapeAI administrator.</p>
         {% if error %}<div class="message error" role="alert">{{ error }}</div>{% endif %}
+        {% if notice %}<div class="message success" role="status">Your password was updated. Sign in with your new password.</div>{% endif %}
         <form method="post" action="{{ url_for('login') }}" class="auth-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label for="email">Email</label>
@@ -24,6 +25,7 @@
             <input id="password" name="password" type="password" autocomplete="current-password" required>
             <button type="submit">Sign in</button>
         </form>
+        <p class="auth-footnote"><a href="{{ url_for('password_reset') }}">Forgot your password?</a></p>
         <p class="auth-footnote">Accounts are invite-only. Contact your administrator if you need access.</p>
     </main>
 </body>

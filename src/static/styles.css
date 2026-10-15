@@ -721,6 +721,10 @@ th {
     gap: 9px;
 }
 
+#reset-confirm-form[hidden] {
+    display: none;
+}
+
 .auth-form label {
     margin-top: 7px;
     color: #3a4860;

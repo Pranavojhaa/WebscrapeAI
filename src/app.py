@@ -7,9 +7,14 @@ import hashlib
 import ipaddress
 import re
 import secrets
+import smtplib
+import ssl
 import threading
 import time
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from typing import Any
+from urllib.parse import urlsplit
 
 import pandas as pd
 import requests
@@ -81,9 +86,11 @@ class SlidingWindowLimiter:
     def record(self, key: str) -> None:
         with self.lock:
             now = time.monotonic()
-            if len(self.hits) > 10_000:
+            if key not in self.hits and len(self.hits) >= 10_000:
                 for stale in list(self.hits):
                     self._recent(stale, now)
+                if len(self.hits) >= 10_000:
+                    self.hits.pop(next(iter(self.hits)))
             self.hits[key] = self._recent(key, now) + [now]
 
     def hit(self, key: str) -> bool:
@@ -92,11 +99,23 @@ class SlidingWindowLimiter:
             recent = self._recent(key, now)
             if len(recent) >= self.limit:
                 return False
+            if key not in self.hits and len(self.hits) >= 10_000:
+                for stale in list(self.hits):
+                    self._recent(stale, now)
+                if len(self.hits) >= 10_000:
+                    self.hits.pop(next(iter(self.hits)))
             self.hits[key] = recent + [now]
             return True
 
+    def clear(self, key: str) -> None:
+        with self.lock:
+            self.hits.pop(key, None)
+
 
 auth_failure_limiter = SlidingWindowLimiter(10, 15 * 60)
+login_request_limiter = SlidingWindowLimiter(30, 15 * 60)
+password_reset_ip_limiter = SlidingWindowLimiter(10, 15 * 60)
+password_reset_email_limiter = SlidingWindowLimiter(3, 60 * 60)
 post_limiter = SlidingWindowLimiter(30, 60)
 analysis_limiter = SlidingWindowLimiter(20, 60 * 60)
 account_stores: dict[str, AccountStore] = {}
@@ -122,6 +141,12 @@ def login_attempt_key(email: str) -> str:
     normalized_email = email.strip().lower()
     digest = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
     return f"{client_key()}:login:{digest}"
+
+
+def password_reset_email_key(email: str) -> str:
+    normalized_email = email.strip().lower()
+    digest = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
+    return f"password-reset:{digest}"
 
 
 def too_many_requests(limiter: SlidingWindowLimiter):
@@ -175,8 +200,101 @@ def csrf_token() -> str:
     return token
 
 
+def same_origin_form_submission() -> bool:
+    origin = request.headers.get("Origin", "").strip()
+    source = origin or request.referrer or ""
+    if not source or source.lower() == "null":
+        return False
+
+    try:
+        parsed = urlsplit(source)
+    except ValueError:
+        return False
+    expected_scheme = "https" if is_production() else request.scheme.lower()
+    if parsed.scheme.lower() != expected_scheme or parsed.netloc.lower() != request.host.lower():
+        return False
+    if origin and (parsed.path or parsed.query or parsed.fragment):
+        return False
+    return True
+
+
 def valid_email(email: str) -> bool:
     return len(email) <= 254 and re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email) is not None
+
+
+def password_reset_settings() -> dict[str, Any]:
+    base_url = os.getenv("PASSWORD_RESET_BASE_URL", "").strip().rstrip("/")
+    parsed = urlsplit(base_url)
+    smtp_host = os.getenv("SMTP_HOST", "").strip()
+    smtp_from = os.getenv("SMTP_FROM", "").strip()
+    username = os.getenv("SMTP_USERNAME", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "")
+    try:
+        base_port = parsed.port
+    except ValueError as error:
+        raise ValueError("Password recovery is not configured.") from error
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+        or "?" in base_url
+        or "#" in base_url
+        or (base_port is not None and not 1 <= base_port <= 65535)
+        or not smtp_host
+        or not smtp_from
+        or bool(username) != bool(password)
+    ):
+        raise ValueError("Password recovery is not configured.")
+    try:
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    except ValueError as error:
+        raise ValueError("Password recovery is not configured.") from error
+    if not 1 <= smtp_port <= 65535:
+        raise ValueError("Password recovery is not configured.")
+    return {
+        "base_url": base_url,
+        "smtp_host": smtp_host,
+        "smtp_port": smtp_port,
+        "smtp_from": smtp_from,
+        "smtp_username": username,
+        "smtp_password": password,
+    }
+
+
+def send_password_reset_email(email: str, reset_url: str, settings: dict[str, Any]) -> None:
+    message = EmailMessage()
+    message["Subject"] = "Reset your WebScrapeAI password"
+    message["From"] = settings["smtp_from"]
+    message["To"] = email
+    message.set_content(
+        "A password reset was requested for your WebScrapeAI account.\n\n"
+        f"Use this link within 30 minutes to choose a new password:\n{reset_url}\n\n"
+        "If you did not request this, you can ignore this email."
+    )
+    context = ssl.create_default_context()
+    if settings["smtp_port"] == 465:
+        with smtplib.SMTP_SSL(
+            settings["smtp_host"], settings["smtp_port"], timeout=10, context=context
+        ) as server:
+            if settings["smtp_username"]:
+                server.login(settings["smtp_username"], settings["smtp_password"])
+            server.send_message(message)
+        return
+    with smtplib.SMTP(settings["smtp_host"], settings["smtp_port"], timeout=10) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        if settings["smtp_username"]:
+            server.login(settings["smtp_username"], settings["smtp_password"])
+        server.send_message(message)
+
+
+def reset_request_message() -> str:
+    return "If an active account matches, a password reset link will be emailed."
 
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -211,10 +329,15 @@ def enforce_production_authentication():
         except Exception:
             app.logger.exception("Private account store initialization failed")
             return {"error": "Private account storage is unavailable."}, 503
-        if request.path != "/login":
+        public_auth_paths = {"/login", "/password-reset", "/password-reset/confirm"}
+        if request.path not in public_auth_paths:
             email = session.get("user_email", "")
             user = store.get_user(email) if email else None
-            if user is None or not user["is_active"]:
+            if (
+                user is None
+                or not user["is_active"]
+                or session.get("session_version") != user["session_version"]
+            ):
                 session.clear()
                 return redirect(url_for("login"))
             g.current_user = {"email": user["email"], "is_admin": user["is_admin"]}
@@ -225,13 +348,30 @@ def enforce_production_authentication():
         supplied_token = request.form.get("csrf_token", "")
         expected_token = session.get("csrf_token", "")
         if not expected_token or not secrets_match(supplied_token, expected_token):
-            return "Invalid or expired form token. Reload the page and try again.", 400
+            if request.path == "/login" and supplied_token and same_origin_form_submission():
+                app.logger.info("Login CSRF session mismatch accepted after exact-origin validation")
+            else:
+                if not expected_token:
+                    reason = "session token missing"
+                elif not supplied_token:
+                    reason = "form token missing"
+                else:
+                    reason = "tokens did not match"
+                app.logger.warning("CSRF validation rejected a form submission: %s", reason)
+                return "Invalid or expired form token. Reload the page and try again.", 400
         if not post_limiter.hit(client_key()):
             return too_many_requests(post_limiter)
         if request.path == "/login":
+            if not login_request_limiter.hit(client_key()):
+                return too_many_requests(login_request_limiter)
             attempt_key = login_attempt_key(request.form.get("email", ""))
             if auth_failure_limiter.blocked(attempt_key):
                 return too_many_requests(auth_failure_limiter)
+        if request.path == "/password-reset":
+            if not password_reset_ip_limiter.hit(client_key()):
+                return too_many_requests(password_reset_ip_limiter)
+            reset_key = password_reset_email_key(request.form.get("email", ""))
+            g.password_reset_email_throttled = not password_reset_email_limiter.hit(reset_key)
         if request.form.get("action") == "analyze" and not analysis_limiter.hit(client_key()):
             return too_many_requests(analysis_limiter)
     return None
@@ -246,6 +386,8 @@ def add_security_headers(response):
         "default-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     )
     response.headers.setdefault("X-Frame-Options", "DENY")
+    if request.path in ("/login", "/password-reset", "/password-reset/confirm"):
+        response.headers["Cache-Control"] = "no-store"
     if is_production():
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
@@ -463,12 +605,89 @@ def login():
             auth_failure_limiter.record(login_attempt_key(email))
             error = "The email or password is incorrect, or this account is disabled."
         else:
-            auth_failure_limiter.hits.pop(login_attempt_key(email), None)
+            auth_failure_limiter.clear(login_attempt_key(email))
             session.clear()
             session["user_email"] = user["email"]
+            session["session_version"] = user["session_version"]
             csrf_token()
             return redirect(url_for("index"))
-    return render_template("login.html", error=error, csrf_token=csrf_token())
+    notice = session.pop("password_reset_complete", False)
+    return render_template("login.html", error=error, notice=notice, csrf_token=csrf_token())
+
+
+@app.route("/password-reset", methods=["GET", "POST"])
+def password_reset():
+    error = None
+    message = None
+    status_code = 200
+    if request.method == "POST":
+        try:
+            settings = password_reset_settings()
+        except ValueError:
+            error = "Password recovery is not configured yet. Contact the administrator."
+            status_code = 503
+        else:
+            email = request.form.get("email", "").strip().lower()
+            if valid_email(email) and not getattr(g, "password_reset_email_throttled", False):
+                try:
+                    store = ensure_account_store()
+                    user = store.get_user(email)
+                    if user and user["is_active"]:
+                        raw_token = secrets.token_urlsafe(32)
+                        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+                        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+                        if store.issue_password_reset(email, token_hash, expires_at):
+                            reset_url = f"{settings['base_url']}/password-reset#token={raw_token}"
+                            try:
+                                send_password_reset_email(email, reset_url, settings)
+                            except Exception:
+                                store.delete_password_reset_token(token_hash)
+                                app.logger.error("Password reset email delivery failed")
+                except Exception:
+                    app.logger.error("Password reset request could not be completed")
+            message = reset_request_message()
+    return (
+        render_template(
+            "password_reset.html",
+            error=error,
+            message=message,
+            csrf_token=csrf_token(),
+            reset_token="",
+            show_reset_form=False,
+        ),
+        status_code,
+    )
+
+
+@app.post("/password-reset/confirm")
+def password_reset_confirm():
+    token = request.form.get("token", "")
+    password = request.form.get("password", "")
+    try:
+        if len(token) > 200 or len(password) < 16 or len(password) > 1024:
+            raise AccountStoreError("Choose a password between 16 and 1024 characters.")
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        store = ensure_account_store()
+        if not store.consume_password_reset(token_hash, password):
+            raise AccountStoreError("That reset link is invalid or expired.")
+    except AccountStoreError as error:
+        return (
+            render_template(
+                "password_reset.html",
+                error=str(error),
+                message=None,
+                csrf_token=csrf_token(),
+                reset_token=token,
+                show_reset_form=True,
+            ),
+            400,
+        )
+    except Exception:
+        app.logger.error("Password reset could not be completed")
+        return {"error": "Password reset is temporarily unavailable."}, 503
+    session.clear()
+    session["password_reset_complete"] = True
+    return redirect(url_for("login"))
 
 
 @app.post("/logout")
