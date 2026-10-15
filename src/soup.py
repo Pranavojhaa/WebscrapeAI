@@ -1,10 +1,9 @@
-import requests
 from bs4 import BeautifulSoup
+from network import fetch_public_html
 
 def fetch_page(url):
-    response = requests.get(url)
-    return  BeautifulSoup(response.content, 'html.parser') 
-
+    content, _ = fetch_public_html(url)
+    return BeautifulSoup(content, "html.parser")
 
 
 

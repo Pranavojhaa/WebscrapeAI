@@ -1,5 +1,3 @@
-import requests
-from bs4 import BeautifulSoup
 from scraper import scrape_table, scrape_headings, scrape_images, scrape_links, scrape_paragraphs, scrape_quotes
 from soup import fetch_page
 from exporter import export_table, export_text_data, export_links, export_images

@@ -173,6 +173,17 @@ th {
     word-break: break-word;
 }
 
+.privacy-note {
+    margin: 0 0 12px;
+    color: #526173;
+    font-size: 14px;
+}
+
+.analysis-copy {
+    white-space: pre-wrap;
+    line-height: 1.65;
+}
+
 @media (max-width: 640px) {
     .page {
         padding: 24px 12px 40px;

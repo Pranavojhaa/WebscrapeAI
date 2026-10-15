@@ -1,4 +1,3 @@
-import pandas as pd
 import json
 
 def export_table(table_df, file_format='csv'):
