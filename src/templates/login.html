@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in · WebScrapeAI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="auth-body">
+    <main class="auth-card">
+        <a class="demo-brand auth-brand" href="/" aria-label="WebScrapeAI home">
+            <span class="brand-mark" aria-hidden="true">W</span>
+            <span>WebScrape<span>AI</span></span>
+        </a>
+        <p class="eyebrow">PRIVATE WORKSPACE</p>
+        <h1>Sign in</h1>
+        <p class="intro">Use an account created by your WebScrapeAI administrator.</p>
+        {% if error %}<div class="message error" role="alert">{{ error }}</div>{% endif %}
+        <form method="post" action="{{ url_for('login') }}" class="auth-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="username" required autofocus>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <button type="submit">Sign in</button>
+        </form>
+        <p class="auth-footnote">Accounts are invite-only. Contact your administrator if you need access.</p>
+    </main>
+</body>
+</html>

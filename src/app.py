@@ -3,7 +3,9 @@ import sys
 import io
 import json
 import hmac
+import hashlib
 import ipaddress
+import re
 import secrets
 import threading
 import time
@@ -11,15 +13,18 @@ from typing import Any
 
 import pandas as pd
 import requests
-from flask import Flask, render_template, request, send_file, session
+from dotenv import load_dotenv
+from flask import Flask, g, redirect, render_template, request, send_file, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from account_store import AccountStore, AccountStoreError
 from inspector import fetch_count, get_element_data
-from analyzer import analyze_scraped_data
 from network import URLSafetyError
 from smart_scrapper import get_soup, validate_soup
+
+load_dotenv()
 
 ELEMENT_OPTIONS = {
     "paragraphs": "Paragraphs",
@@ -33,7 +38,18 @@ ELEMENT_OPTIONS = {
 
 def is_production() -> bool:
     # Fail closed: anything not explicitly marked as development requires authentication.
-    return os.getenv("APP_ENV", "").strip().lower() != "development" or bool(os.getenv("RAILWAY_ENVIRONMENT"))
+    return os.getenv("APP_ENV", "").strip().lower() != "development"
+
+
+def trusted_proxy_hops() -> int:
+    value = os.getenv("TRUSTED_PROXY_HOPS", "0").strip()
+    try:
+        hops = int(value)
+    except ValueError as error:
+        raise RuntimeError("TRUSTED_PROXY_HOPS must be a non-negative integer.") from error
+    if hops < 0:
+        raise RuntimeError("TRUSTED_PROXY_HOPS must be a non-negative integer.")
+    return hops
 
 
 def secrets_match(supplied: str, expected: str) -> bool:
@@ -42,8 +58,8 @@ def secrets_match(supplied: str, expected: str) -> bool:
 
 
 class SlidingWindowLimiter:
-    # ponytail: in-memory and per worker process (railway.json runs 2), so effective limits are up to 2x
-    # and reset on restart. Move to Flask-Limiter with a shared Redis store if that stops being good enough.
+    # Limits are in-memory and per worker process, and reset on restart. Move to Flask-Limiter
+    # with a shared Redis store if that stops being good enough.
     def __init__(self, limit: int, window_seconds: int):
         self.limit = limit
         self.window = window_seconds
@@ -83,9 +99,15 @@ class SlidingWindowLimiter:
 auth_failure_limiter = SlidingWindowLimiter(10, 15 * 60)
 post_limiter = SlidingWindowLimiter(30, 60)
 analysis_limiter = SlidingWindowLimiter(20, 60 * 60)
+account_stores: dict[str, AccountStore] = {}
+account_stores_lock = threading.Lock()
 
 
 def client_key() -> str:
+    current_user = getattr(g, "current_user", None)
+    if current_user and current_user.get("email") != "local development":
+        digest = hashlib.sha256(current_user["email"].encode("utf-8")).hexdigest()
+        return f"account:{digest}"
     # IPv6 clients usually control a whole /64, so limit per /64 rather than per address.
     try:
         address = ipaddress.ip_address(request.remote_addr or "")
@@ -94,6 +116,12 @@ def client_key() -> str:
     if address.version == 6:
         return str(ipaddress.ip_network(f"{address}/64", strict=False))
     return str(address)
+
+
+def login_attempt_key(email: str) -> str:
+    normalized_email = email.strip().lower()
+    digest = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
+    return f"{client_key()}:login:{digest}"
 
 
 def too_many_requests(limiter: SlidingWindowLimiter):
@@ -110,10 +138,45 @@ def neutralize_formula(value: Any) -> Any:
     return value
 
 
+def deployment_mode() -> str:
+    return os.getenv("APP_MODE", "private").strip().lower()
+
+
 def has_production_credentials() -> bool:
-    password = os.getenv("APP_PASSWORD", "")
     secret_key = os.getenv("APP_SECRET_KEY", "")
-    return bool(os.getenv("APP_USERNAME")) and len(password) >= 16 and len(secret_key) >= 32
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    return len(secret_key) >= 32 and database_url.startswith(("postgres://", "postgresql://"))
+
+
+def get_account_store() -> AccountStore:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        raise AccountStoreError("DATABASE_URL is required for the private app.")
+    with account_stores_lock:
+        if database_url not in account_stores:
+            account_stores[database_url] = AccountStore(database_url)
+        return account_stores[database_url]
+
+
+def ensure_account_store() -> AccountStore:
+    store = get_account_store()
+    store.initialize(
+        os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""),
+        os.getenv("BOOTSTRAP_ADMIN_PASSWORD", ""),
+    )
+    return store
+
+
+def csrf_token() -> str:
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def valid_email(email: str) -> bool:
+    return len(email) <= 254 and re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email) is not None
 
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -124,33 +187,40 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=is_production(),
 )
-if os.getenv("RAILWAY_ENVIRONMENT"):
-    # Railway's proxy appends the real client address to X-Forwarded-For; trust only that last entry
-    # so a client-supplied header cannot pick its own rate-limit key.
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+proxy_hops = trusted_proxy_hops()
+if proxy_hops:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxy_hops)
 
 
 @app.before_request
 def enforce_production_authentication():
+    mode = deployment_mode()
+    if mode != "private":
+        return {"error": "The private service must use APP_MODE=private."}, 503
+
+    g.current_user = None
     if is_production():
+        if request.path == "/health" or request.path.startswith("/static/"):
+            return None
         if not has_production_credentials():
-            return {"error": "Production authentication is not configured."}, 503
-        if request.path != "/health":
-            credentials = request.authorization
-            if credentials and auth_failure_limiter.blocked(client_key()):
-                return too_many_requests(auth_failure_limiter)
-            expected_username = os.environ["APP_USERNAME"]
-            expected_password = os.environ["APP_PASSWORD"]
-            if not credentials or not (
-                secrets_match(credentials.username or "", expected_username)
-                & secrets_match(credentials.password or "", expected_password)
-            ):
-                # The browser's first, credential-less request is not a failed guess.
-                if credentials:
-                    auth_failure_limiter.record(client_key())
-                return {"error": "Authentication required."}, 401, {
-                    "WWW-Authenticate": 'Basic realm="WebScrapeAI"'
-                }
+            return {"error": "Private app authentication or database is not configured."}, 503
+        try:
+            store = ensure_account_store()
+        except AccountStoreError as error:
+            return {"error": str(error)}, 503
+        except Exception:
+            app.logger.exception("Private account store initialization failed")
+            return {"error": "Private account storage is unavailable."}, 503
+        if request.path != "/login":
+            email = session.get("user_email", "")
+            user = store.get_user(email) if email else None
+            if user is None or not user["is_active"]:
+                session.clear()
+                return redirect(url_for("login"))
+            g.current_user = {"email": user["email"], "is_admin": user["is_admin"]}
+    else:
+        g.current_user = {"email": "local development", "is_admin": True}
+
     if request.method == "POST":
         supplied_token = request.form.get("csrf_token", "")
         expected_token = session.get("csrf_token", "")
@@ -158,6 +228,10 @@ def enforce_production_authentication():
             return "Invalid or expired form token. Reload the page and try again.", 400
         if not post_limiter.hit(client_key()):
             return too_many_requests(post_limiter)
+        if request.path == "/login":
+            attempt_key = login_attempt_key(request.form.get("email", ""))
+            if auth_failure_limiter.blocked(attempt_key):
+                return too_many_requests(auth_failure_limiter)
         if request.form.get("action") == "analyze" and not analysis_limiter.hit(client_key()):
             return too_many_requests(analysis_limiter)
     return None
@@ -286,10 +360,7 @@ def build_export_response(result: Any, selected_element: str, export_format: str
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    csrf_token = session.get("csrf_token")
-    if not csrf_token:
-        csrf_token = secrets.token_urlsafe(32)
-        session["csrf_token"] = csrf_token
+    token = csrf_token()
 
     page_data: dict[str, Any] = {
         "url": "",
@@ -302,7 +373,8 @@ def index():
         "validated": False,
         "analysis": None,
         "ai_enabled": bool(os.getenv("OPENAI_API_KEY")),
-        "csrf_token": csrf_token,
+        "csrf_token": token,
+        "current_user": getattr(g, "current_user", None),
     }
 
     if request.method == "POST":
@@ -354,6 +426,8 @@ def index():
                     page_data["error"] = "There are no results to analyse."
                 else:
                     analysis_data = result.to_string(index=False) if isinstance(result, pd.DataFrame) else json.dumps(result, ensure_ascii=False)
+                    from analyzer import analyze_scraped_data
+
                     page_data["analysis"] = analyze_scraped_data(
                         f"Page: {normalized_url}\nContent type: {selected_label}\n\n{analysis_data}"
                     )
@@ -371,9 +445,83 @@ def index():
     return render_template("index.html", element_options=ELEMENT_OPTIONS, **page_data)
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        try:
+            store = ensure_account_store()
+            user = store.authenticate(email, password)
+        except AccountStoreError as exception:
+            return {"error": str(exception)}, 503
+        except Exception:
+            app.logger.exception("Private account lookup failed")
+            return {"error": "Private account storage is unavailable."}, 503
+        if user is None:
+            auth_failure_limiter.record(login_attempt_key(email))
+            error = "The email or password is incorrect, or this account is disabled."
+        else:
+            auth_failure_limiter.hits.pop(login_attempt_key(email), None)
+            session.clear()
+            session["user_email"] = user["email"]
+            csrf_token()
+            return redirect(url_for("index"))
+    return render_template("login.html", error=error, csrf_token=csrf_token())
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/admin/users", methods=["GET", "POST"])
+def admin_users():
+    current_user = getattr(g, "current_user", None)
+    if not current_user or not current_user["is_admin"]:
+        return "Not found.", 404
+
+    store = ensure_account_store()
+    message = None
+    error = None
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        email = request.form.get("email", "").strip().lower()
+        try:
+            if action == "create":
+                password = request.form.get("password", "")
+                if not valid_email(email):
+                    raise AccountStoreError("Enter a valid email address.")
+                if len(password) < 16:
+                    raise AccountStoreError("Use a temporary password of at least 16 characters.")
+                store.create_user(email, password)
+                message = f"Account created for {email}. Share its temporary password securely."
+            elif action in ("disable", "enable"):
+                store.set_active(email, action == "enable", current_user["email"])
+                message = f"Account {email} {'enabled' if action == 'enable' else 'disabled'}."
+            else:
+                error = "Choose a valid account action."
+        except AccountStoreError as exception:
+            error = str(exception)
+        except Exception:
+            app.logger.exception("Account management action failed")
+            error = "The account change could not be saved. Try again."
+
+    return render_template(
+        "admin_users.html",
+        current_user=current_user,
+        users=store.list_users(),
+        message=message,
+        error=error,
+        csrf_token=csrf_token(),
+    )
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}, 200
+    return {"status": "ok", "mode": deployment_mode()}, 200
 
 
 if __name__ == "__main__":

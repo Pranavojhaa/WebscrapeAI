@@ -33,7 +33,6 @@ def dynamic_rendering_enabled():
         # Fail closed like app.is_production(): the browser has no per-request address checks,
         # so it only runs where the person submitting URLs is the person running it.
         and os.getenv("APP_ENV", "").strip().lower() == "development"
-        and not os.getenv("RAILWAY_ENVIRONMENT")
     )
 
 class SmartScraper:

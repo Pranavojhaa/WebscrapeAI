@@ -21,6 +21,7 @@ class SecurityRegressionTests(unittest.TestCase):
         self.environment_patch = patch.dict(os.environ, {"APP_ENV": "development"}, clear=True)
         self.environment_patch.start()
         web_app.app.config.update(TESTING=True)
+        web_app.account_stores.clear()
         for limiter in (web_app.auth_failure_limiter, web_app.post_limiter, web_app.analysis_limiter):
             limiter.hits.clear()
         self.client = web_app.app.test_client()
@@ -62,11 +63,26 @@ class SecurityRegressionTests(unittest.TestCase):
         response = self.client.post("/", data={"url": "example.test", "csrf_token": "é"})
         self.assertEqual(response.status_code, 400)
 
-    def test_non_ascii_basic_auth_is_rejected_not_crashed(self):
-        environment = {"APP_ENV": "production", "APP_USERNAME": "admin", "APP_PASSWORD": "p" * 16, "APP_SECRET_KEY": "s" * 32}
-        with patch.dict(os.environ, environment, clear=True):
-            response = self.client.get("/", auth=("é", "é"))
-        self.assertEqual(response.status_code, 401)
+    def test_non_ascii_login_input_is_rejected_not_crashed(self):
+        environment = {
+            "APP_ENV": "production",
+            "APP_MODE": "private",
+            "DATABASE_URL": "sqlite:///:memory:",
+            "BOOTSTRAP_ADMIN_EMAIL": "owner@example.test",
+            "BOOTSTRAP_ADMIN_PASSWORD": "owner-test-password-long-enough",
+            "APP_SECRET_KEY": "s" * 32,
+        }
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(web_app, "has_production_credentials", return_value=True),
+        ):
+            response = self.client.post(
+                "/login",
+                data={"email": "é@example.test", "password": "é", "csrf_token": self.csrf_token},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"email or password is incorrect", response.data)
 
     def test_security_headers(self):
         response = self.client.get("/")
@@ -118,7 +134,7 @@ class SecurityRegressionTests(unittest.TestCase):
         other = self.client.post("/", data=data, environ_base={"REMOTE_ADDR": "203.0.113.9"})
         self.assertEqual(other.status_code, 200)
 
-    def test_spoofed_forwarded_for_does_not_change_the_key_outside_railway(self):
+    def test_spoofed_forwarded_for_does_not_change_the_key_without_trusted_proxy(self):
         data = {"url": "", "csrf_token": self.csrf_token}
         for index in range(web_app.post_limiter.limit):
             self.client.post("/", data=data, headers={"X-Forwarded-For": f"198.51.100.{index}"})
@@ -131,15 +147,36 @@ class SecurityRegressionTests(unittest.TestCase):
             self.client.post("/", data=data)
         self.assertEqual(self.client.post("/", data=data).status_code, 429)
 
-    def test_failed_logins_are_throttled_even_for_the_right_password(self):
-        environment = {"APP_ENV": "production", "APP_USERNAME": "admin", "APP_PASSWORD": "p" * 16, "APP_SECRET_KEY": "s" * 32}
-        with patch.dict(os.environ, environment, clear=True):
-            self.assertEqual(self.client.get("/").status_code, 401)  # browser's credential-less probe
-            for _ in range(web_app.auth_failure_limiter.limit):
-                self.assertEqual(self.client.get("/", auth=("admin", "wrong")).status_code, 401)
-            locked = self.client.get("/", auth=("admin", "p" * 16))
-            other_client = self.client.get("/", auth=("admin", "p" * 16), environ_base={"REMOTE_ADDR": "203.0.113.9"})
+    def test_failed_logins_are_throttled_per_client_and_email(self):
+        environment = {
+            "APP_ENV": "production",
+            "APP_MODE": "private",
+            "DATABASE_URL": "sqlite:///:memory:",
+            "BOOTSTRAP_ADMIN_EMAIL": "owner@example.test",
+            "BOOTSTRAP_ADMIN_PASSWORD": "owner-test-password-long-enough",
+            "APP_SECRET_KEY": "s" * 32,
+        }
+        login_data = {
+            "email": "owner@example.test",
+            "password": "wrong-password",
+            "csrf_token": self.csrf_token,
+        }
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(web_app, "has_production_credentials", return_value=True),
+        ):
+            responses = [
+                self.client.post("/login", data=login_data)
+                for _ in range(web_app.auth_failure_limiter.limit)
+            ]
+            locked = self.client.post("/login", data=login_data)
+            other_client = self.client.post(
+                "/login",
+                data=login_data,
+                environ_base={"REMOTE_ADDR": "203.0.113.9"},
+            )
 
+        self.assertTrue(all(response.status_code == 200 for response in responses))
         self.assertEqual(locked.status_code, 429)
         self.assertIn("Retry-After", locked.headers)
         self.assertEqual(other_client.status_code, 200)

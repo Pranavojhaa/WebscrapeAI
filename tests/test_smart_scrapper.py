@@ -26,7 +26,7 @@ class DynamicRenderingConfigurationTests(unittest.TestCase):
     def test_dynamic_rendering_is_blocked_in_production(self):
         for environment in (
             {"ENABLE_SELENIUM": "true", "APP_ENV": "Production"},
-            {"ENABLE_SELENIUM": "true", "RAILWAY_ENVIRONMENT": "production"},
+            {"ENABLE_SELENIUM": "true", "APP_ENV": "production"},
         ):
             with self.subTest(environment=environment), patch.dict(os.environ, environment, clear=True):
                 self.assertFalse(dynamic_rendering_enabled())
