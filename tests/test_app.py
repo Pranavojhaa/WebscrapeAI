@@ -100,6 +100,30 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("Content-Security-Policy", authorized.headers)
         self.assertIn(b"Private scraping workspace", authorized.data)
 
+    def test_unauthenticated_background_request_keeps_login_csrf_token(self):
+        # Browsers fetch /favicon.ico after rendering /login; that redirect must not rotate the form token.
+        environment = {
+            "APP_ENV": "production",
+            "APP_MODE": "private",
+            "DATABASE_URL": "sqlite:///:memory:",
+            "BOOTSTRAP_ADMIN_EMAIL": "owner@example.test",
+            "BOOTSTRAP_ADMIN_PASSWORD": "correct-horse-battery-staple",
+            "APP_SECRET_KEY": "test-session-signing-key-that-is-long-enough-1234567890",
+        }
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(web_app, "has_production_credentials", return_value=True),
+        ):
+            client = web_app.app.test_client()
+            csrf = self.read_csrf_token(client.get("/login").data)
+            client.get("/favicon.ico", follow_redirects=True)
+            login_response = client.post(
+                "/login",
+                data={"email": "owner@example.test", "password": "correct-horse-battery-staple", "csrf_token": csrf},
+            )
+
+        self.assertEqual(login_response.status_code, 302)
+
     def test_production_health_check_is_public_when_configured(self):
         environment = {
             "APP_ENV": "production",

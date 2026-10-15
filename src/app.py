@@ -338,7 +338,10 @@ def enforce_production_authentication():
                 or not user["is_active"]
                 or session.get("session_version") != user["session_version"]
             ):
-                session.clear()
+                # Drop only auth state: clearing the CSRF token here would invalidate a login form
+                # already open in another request (e.g. the browser's /favicon.ico fetch).
+                session.pop("user_email", None)
+                session.pop("session_version", None)
                 return redirect(url_for("login"))
             g.current_user = {"email": user["email"], "is_admin": user["is_admin"]}
     else:
