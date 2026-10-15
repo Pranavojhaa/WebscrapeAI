@@ -40,6 +40,7 @@ class AnalyzerTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
             analyzer.analyze_scraped_data("text")
 
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
     @patch("builtins.input", side_effect=["What is the title?", "exit"])
     @patch("builtins.print")
     @patch("analyzer.OpenAI")
@@ -49,6 +50,7 @@ class AnalyzerTests(unittest.TestCase):
 
         analyzer.start_chat_with_data("Page title: Example")
 
+        openai.assert_called_once_with(api_key="test-key", timeout=30, max_retries=1)
         sent_input = client.responses.create.call_args.kwargs["input"]
         self.assertEqual(len(sent_input), 2)
         self.assertEqual(sent_input[0]["content"], "Webpage extraction:\nPage title: Example")
