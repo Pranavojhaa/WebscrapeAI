@@ -99,7 +99,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(login_response.status_code, 302)
         self.assertEqual(authorized.status_code, 200)
         self.assertIn("Content-Security-Policy", authorized.headers)
-        self.assertIn(b"Ask a webpage anything.", authorized.data)
+        self.assertIn(b"Read a webpage, then question it.", authorized.data)
 
     def test_unauthenticated_background_request_keeps_login_csrf_token(self):
         # Browsers fetch /favicon.ico after rendering /login; that redirect must not rotate the form token.
@@ -233,7 +233,7 @@ class WebAppTests(unittest.TestCase):
     def test_home_page_renders(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Ask a webpage anything.", response.data)
+        self.assertIn(b"Read a webpage, then question it.", response.data)
 
     def test_inspection_renders_results(self):
         with (
@@ -323,13 +323,18 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("attachment;", response.headers["Content-Disposition"])
         self.assertEqual(response.data.decode(), "Name,Work\nAda,Analytical Engine\n")
 
-    def test_read_page_gives_overview_with_questions_then_answers_with_history(self):
+    def test_read_then_overview_then_answer_keeps_history(self):
         from bs4 import BeautifulSoup
 
         soup = BeautifulSoup("<title>Cats</title><h1>All about cats</h1><p>Cats purr.</p>", "html.parser")
         replies = [
-            {"answer": "A page about cats.", "questions": ["Why do cats purr?", "What do cats eat?"]},
-            {"answer": "Cats purr when content.", "questions": ["Do big cats purr?"]},
+            {
+                "answer": "A page about cats.",
+                "findings": [{"point": "Cats purr.", "quote": "Cats purr."}],
+                "citations": [],
+                "questions": ["Why do cats purr?", "What do cats eat?"],
+            },
+            {"answer": "Cats purr when content.", "findings": [], "citations": ["Cats purr."], "questions": ["Do big cats purr?"]},
         ]
         headers = {"X-CSRF-Token": self.csrf_token}
         with (
@@ -339,6 +344,8 @@ class WebAppTests(unittest.TestCase):
             patch("analyzer.ask_page", side_effect=replies) as ask_page,
         ):
             page = self.client.post("/api/page", json={"url": "cats.example.test/about"}, headers=headers)
+            overview = self.client.post("/api/overview", headers=headers)
+            overview_again = self.client.post("/api/overview", headers=headers)
             home = self.client.get("/")
             answer = self.client.post("/api/ask", json={"question": "  Why do cats   purr? "}, headers=headers)
 
@@ -346,10 +353,15 @@ class WebAppTests(unittest.TestCase):
         body = page.get_json()
         self.assertEqual(body["url"], "https://cats.example.test/about")
         self.assertEqual(body["title"], "Cats")
-        self.assertEqual(body["messages"][0]["questions"], ["Why do cats purr?", "What do cats eat?"])
+        self.assertEqual(body["messages"], [])
+        self.assertTrue(body["ai_enabled"])
         self.assertNotIn("context", body)
+        self.assertEqual(overview.get_json()["questions"], ["Why do cats purr?", "What do cats eat?"])
+        self.assertEqual(overview.get_json()["findings"], [{"point": "Cats purr.", "quote": "Cats purr."}])
+        self.assertEqual(overview_again.get_json(), overview.get_json())
         self.assertIn(b"A page about cats.", home.data)
-        self.assertEqual(answer.get_json(), replies[1])
+        self.assertEqual(answer.get_json()["citations"], ["Cats purr."])
+        self.assertEqual(ask_page.call_count, 2)
         page_text, history, question = ask_page.call_args.args
         self.assertIn("Cats purr.", page_text)
         self.assertEqual(history, [{"role": "assistant", "content": "A page about cats."}])

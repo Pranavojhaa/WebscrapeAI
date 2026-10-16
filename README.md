@@ -1,6 +1,6 @@
 # WebScrapeAI
 
-A Flask app and CLI for extracting headings, paragraphs, images, links, quotes, and tables from public HTML pages. The private app can export results and optionally request an AI analysis. The separate public demo uses only bundled sample data.
+A Flask app and CLI for extracting headings, paragraphs, images, links, quotes, and tables from public HTML pages. The private app reads a page, then (when an OpenAI key is configured) gives an overview, key findings with quotes checked against the page text, and clickable follow-up questions; it can also export the extracted data. The separate public demo uses only bundled sample data.
 
 ## Two hosted apps
 
@@ -34,7 +34,7 @@ The deployment blueprint omits `OPENAI_API_KEY` and `DATABASE_URL` from the demo
 
 - Python 3.11 or newer
 - A public HTTP/HTTPS page to inspect in private mode
-- An OpenAI API key only if you want AI analysis
+- An OpenAI API key only if you want AI overviews and questions
 - A local Chrome/Chromium installation only if you explicitly enable Selenium for local development
 
 ```bash
@@ -56,11 +56,11 @@ To run only the read-only demo locally, use `APP_ENV=production APP_MODE=demo py
 
 ## AI and scraping safeguards
 
-AI analysis is opt-in and sends the selected extraction to OpenAI only when a signed-in private user chooses **Analyse with AI**. The analysis input is truncated to 12,000 characters. Configure `OPENAI_API_KEY` and, optionally, `OPENAI_MODEL` in the private service only.
+AI answers are optional. When `OPENAI_API_KEY` is set, a signed-in private user who reads a page sends its title, headings and paragraph text (truncated to 12,000 characters) to OpenAI for an overview, and each question they ask sends the same text plus recent turns. Quotes are shown only when they appear word for word in the page text. Conversations are kept in server memory for two hours per session and are lost on restart; move them to the database before running more than one instance. Configure `OPENAI_API_KEY` and, optionally, `OPENAI_MODEL` in the private service only.
 
 Static HTTP inspection is the default. Dynamic rendering is limited to explicit local development (`ENABLE_SELENIUM=true` and `APP_ENV=development`); it is disabled in both hosted modes. Static fetches allow only standard HTTP/HTTPS ports, block non-public IP addresses, revalidate each redirect, pin DNS resolution to the connection, cap responses at 5 MB, and use timeouts. These are application-layer safeguards, not a substitute for network controls if the service later handles untrusted users or broader workloads.
 
-Password recovery uses random one-time tokens stored only as hashes, expires them after 30 minutes, and invalidates existing sessions after a successful reset. Reset email is enabled only when the canonical HTTPS base URL and SMTP settings are configured. Login attempts are limited to 30 requests per source IP per 15 minutes and 10 failures per source/email pair per 15 minutes; password-reset requests are limited to 10 per source IP per 15 minutes and 3 per normalized email per hour. The general form-post and AI-analysis limits also apply. All limits are in-memory, reset on restart, and are not shared between instances; use a shared limiter before scaling or widening access.
+Password recovery uses random one-time tokens stored only as hashes, expires them after 30 minutes, and invalidates existing sessions after a successful reset. Reset email is enabled only when the canonical HTTPS base URL and SMTP settings are configured. Login attempts are limited to 30 requests per source IP per 15 minutes and 10 failures per source/email pair per 15 minutes; password-reset requests are limited to 10 per source IP per 15 minutes and 3 per normalized email per hour. The general form-post limit and an AI limit of 60 page reads and questions per account per hour also apply. All limits are in-memory, reset on restart, and are not shared between instances; use a shared limiter before scaling or widening access.
 
 `/health` is a public liveness route. It does not verify AI configuration or database readiness. The private service returns a configuration error on other routes if its secret, PostgreSQL connection, or first-admin bootstrap is missing.
 

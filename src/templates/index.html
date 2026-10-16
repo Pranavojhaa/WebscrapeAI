@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f6f7f9">
+    <meta name="theme-color" content="#ffffff">
     <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{{ chat.title ~ " – WebScrapeAI" if chat else "WebScrapeAI" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
-<body>
+<body class="{{ 'has-page' if chat or data_open else '' }}">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="topbar">
         <a class="wordmark" href="{{ url_for('index') }}" translate="no">WebScrapeAI</a>
@@ -27,9 +27,12 @@
 
     <main id="main" class="shell">
         <section class="intake" aria-labelledby="intake-title">
-            <h1 id="intake-title">Ask a webpage anything.</h1>
-            <p class="lede">Paste a public page. WebScrapeAI reads it, sums it up, and suggests questions you can ask next.</p>
-            <form id="read-form" class="address-bar" novalidate>
+            <div class="intake-copy">
+                <h1 id="intake-title">Read a webpage, then question it.</h1>
+                <p class="lede">Paste a public link. WebScrapeAI reads the page, pulls out key findings with quotes from the text, and suggests what to ask next.</p>
+            </div>
+
+            <form id="read-form" class="address" novalidate>
                 <label class="visually-hidden" for="page-url">Webpage address</label>
                 <input
                     id="page-url"
@@ -39,46 +42,102 @@
                     autocomplete="url"
                     autocapitalize="off"
                     spellcheck="false"
+                    maxlength="2048"
                     placeholder="en.wikipedia.org/wiki/Web_scraping…"
                     value="{{ chat.url if chat else '' }}"
+                    translate="no"
                     {% if not chat %}autofocus{% endif %}
                 >
-                <button id="read-button" type="submit" class="primary-button">
+                <button id="read-button" type="submit" class="accent-button">
                     <span class="spinner" aria-hidden="true"></span>
-                    <span>Read page</span>
+                    <span class="button-label">Read page</span>
                 </button>
             </form>
-            <p id="read-error" class="field-error" role="alert" hidden></p>
-            {% if not ai_enabled %}
-                <p class="note">AI answers are off until <code translate="no">OPENAI_API_KEY</code> is set on the server. You can still read pages and export their data.</p>
-            {% endif %}
+            <p id="read-status" class="status" role="status" aria-live="polite"></p>
+            <div id="read-error" class="alert" role="alert" hidden>
+                <p class="alert-text"></p>
+                <button type="button" class="quiet-button" id="read-retry">Try again</button>
+            </div>
+
+            <div class="examples">
+                <p class="examples-label" id="examples-label">Or start with one of these pages</p>
+                <ul class="example-list" aria-labelledby="examples-label">
+                    <li><button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Web_scraping"><span class="example-title">Web scraping</span><span class="example-host" translate="no">en.wikipedia.org</span></button></li>
+                    <li><button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Photosynthesis"><span class="example-title">Photosynthesis</span><span class="example-host" translate="no">en.wikipedia.org</span></button></li>
+                    <li><button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol"><span class="example-title">HTTP</span><span class="example-host" translate="no">en.wikipedia.org</span></button></li>
+                </ul>
+            </div>
         </section>
 
-        <section id="conversation" class="conversation" aria-labelledby="source-title" {% if not chat %}hidden{% endif %}>
-            <header class="source">
+        <section class="primer" aria-label="How WebScrapeAI works">
+            <div class="steps">
+                <h2>How it works</h2>
+                <ol class="step-list">
+                    <li><strong>Paste a public link.</strong> Long articles with tables, like Wikipedia pages, work best. Private and local addresses are blocked.</li>
+                    <li><strong>WebScrapeAI reads the page.</strong> The server fetches the page text and counts its headings, paragraphs, links, images and tables.</li>
+                    <li><strong>Question it.</strong> You get an overview, key findings backed by quotes from the page, and follow-up questions you can click.</li>
+                </ol>
+                {% if not ai_enabled %}
+                    <p class="note">AI answers are off until <code translate="no">OPENAI_API_KEY</code> is set on the server. You can still read pages and export their data.</p>
+                {% endif %}
+            </div>
+
+            <figure class="sample" aria-labelledby="sample-caption">
+                <figcaption id="sample-caption"><span class="sample-tag">Sample</span> Illustrative content, not from a real page.</figcaption>
+                <div class="sample-body">
+                    <p class="source-host" translate="no">example.org/field-notes</p>
+                    <p class="sample-title">Field notes on keeping bees on a city rooftop</p>
+                    <p class="sample-overview">A short overview appears here: what the page covers, who it is for and what it concludes.</p>
+                    <p class="sample-heading">Key findings</p>
+                    <ul class="finding-list">
+                        <li><p class="finding-point">Each finding is one plain sentence.</p><p class="quote"><mark>“A quote copied word for word from the page backs it up.”</mark></p></li>
+                        <li><p class="finding-point">Quotes that can’t be found on the page are left out.</p></li>
+                    </ul>
+                    <p class="sample-heading">Ask next</p>
+                    <ul class="sample-questions">
+                        <li>What does a first hive need?</li>
+                        <li>Where should a rooftop hive face?</li>
+                    </ul>
+                </div>
+            </figure>
+        </section>
+
+        <div id="workspace" class="workspace" {% if not chat %}hidden{% endif %}>
+            <a class="source-strip" href="#source">
+                <span class="strip-host" id="strip-host" translate="no"></span>
+                <span class="strip-title" id="strip-title"></span>
+            </a>
+
+            <aside id="source" class="source" aria-labelledby="source-title">
                 <p class="source-host" id="source-host" translate="no"></p>
                 <h2 class="source-title" id="source-title"></h2>
+                <a class="source-url" id="source-url" href="#" target="_blank" rel="noreferrer" translate="no"></a>
                 <ul class="source-counts" id="source-counts" aria-label="What the page contains"></ul>
-                <a class="source-link" id="source-link" href="#" target="_blank" rel="noreferrer">Open page</a>
-            </header>
+                <section class="findings" aria-labelledby="findings-title">
+                    <h3 id="findings-title">Key findings</h3>
+                    <div id="findings" aria-live="polite"></div>
+                </section>
+                <a class="data-link" id="data-link" href="#data-panel">Extracted data and exports</a>
+            </aside>
 
-            <ol class="thread" id="thread" aria-live="polite"></ol>
-
-            {% if ai_enabled %}
-                <form id="ask-form" class="ask-bar" novalidate>
-                    <label class="visually-hidden" for="question">Question about this page</label>
-                    <input id="question" name="question" type="text" maxlength="500" autocomplete="off" placeholder="Ask about this page…">
-                    <button id="ask-button" type="submit" class="primary-button">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <span>Ask</span>
-                    </button>
-                </form>
-                <p id="ask-error" class="field-error" role="alert" hidden></p>
-            {% endif %}
-        </section>
+            <section class="conversation" aria-label="Questions and answers">
+                <ol class="thread" id="thread"></ol>
+                {% if ai_enabled %}
+                    <form id="ask-form" class="ask" novalidate>
+                        <label class="visually-hidden" for="question">Question about this page</label>
+                        <input id="question" name="question" type="text" maxlength="500" autocomplete="off" placeholder="Ask about this page…">
+                        <button id="ask-button" type="submit" class="accent-button">
+                            <span class="spinner" aria-hidden="true"></span>
+                            <span class="button-label">Ask</span>
+                        </button>
+                    </form>
+                    <p id="ask-error" class="field-error" role="alert" hidden></p>
+                {% endif %}
+            </section>
+        </div>
 
         <details id="data-panel" class="data-panel" {% if data_open %}open{% endif %} {% if not chat and not data_open %}hidden{% endif %}>
-            <summary>Extracted data</summary>
+            <summary>Extracted data and exports</summary>
             <form method="post" action="{{ url_for('index') }}" class="data-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="url" id="data-url" value="{{ url }}">
@@ -94,7 +153,7 @@
                     <label for="table_index">Table number</label>
                     <input id="table_index" name="table_index" type="text" inputmode="numeric" value="{{ table_index }}">
                 </div>
-                <button type="submit" name="action" value="inspect" class="secondary-button">Show data</button>
+                <button type="submit" name="action" value="inspect" class="quiet-button">Show data</button>
             </form>
 
             {% if error %}
@@ -103,7 +162,7 @@
 
             {% if result %}
                 <div class="data-result">
-                    <p class="data-count">{{ result.count }} {{ result.label|lower }}</p>
+                    <p class="data-count">{{ result.count }} {{ (result.label[:-1] if result.count == 1 else result.label)|lower }}</p>
 
                     {% if result.kind == "table" %}
                         <div class="table-wrap">
@@ -176,13 +235,13 @@
                                 {% endif %}
                             </select>
                         </div>
-                        <button type="submit" name="action" value="export" class="secondary-button">Download results</button>
+                        <button type="submit" name="action" value="export" class="quiet-button">Download results</button>
                     </form>
                 {% endif %}
             {% endif %}
         </details>
     </main>
 
-    <script type="application/json" id="page-state">{{ chat|tojson }}</script>
+    <script type="application/json" id="page-state">{{ {"chat": chat, "aiEnabled": ai_enabled}|tojson }}</script>
 </body>
 </html>

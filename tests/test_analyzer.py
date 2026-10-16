@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -15,13 +16,13 @@ class AnalyzerTests(unittest.TestCase):
     def test_ask_page_sends_page_history_and_question(self, openai):
         client = openai.return_value.__enter__.return_value
         client.responses.create.return_value = SimpleNamespace(
-            output_text='{"answer": "It is about cats.", "questions": ["Who wrote it?", "  ", "When?"]}'
+            output_text='{"answer": "It is about cats.", "findings": [], "citations": [], "questions": ["Who wrote it?", "  ", "When?"]}'
         )
         history = [{"role": "user", "content": "First?"}, {"role": "assistant", "content": "First answer."}]
 
         result = analyzer.ask_page("Cats page", history, "What is it about?", api_key="test-key", model="test-model")
 
-        self.assertEqual(result, {"answer": "It is about cats.", "questions": ["Who wrote it?", "When?"]})
+        self.assertEqual(result, {"answer": "It is about cats.", "findings": [], "citations": [], "questions": ["Who wrote it?", "When?"]})
         openai.assert_called_once_with(api_key="test-key", timeout=30, max_retries=0)
         request = client.responses.create.call_args.kwargs
         self.assertEqual(request["model"], "test-model")
@@ -34,7 +35,7 @@ class AnalyzerTests(unittest.TestCase):
     @patch("analyzer.OpenAI")
     def test_ask_page_without_question_asks_for_overview_and_truncates_page(self, openai):
         client = openai.return_value.__enter__.return_value
-        client.responses.create.return_value = SimpleNamespace(output_text='{"answer": "Overview.", "questions": []}')
+        client.responses.create.return_value = SimpleNamespace(output_text='{"answer": "Overview.", "findings": [], "citations": [], "questions": []}')
 
         analyzer.ask_page("x" * (analyzer.MAX_ANALYSIS_CHARS + 20), [], api_key="test-key")
 
@@ -46,7 +47,7 @@ class AnalyzerTests(unittest.TestCase):
     def test_ask_page_leaves_room_for_reasoning_models(self, openai):
         # gpt-5-mini spent ~450 of a 500-token budget on reasoning and returned no text.
         client = openai.return_value.__enter__.return_value
-        client.responses.create.return_value = SimpleNamespace(output_text='{"answer": "a", "questions": []}')
+        client.responses.create.return_value = SimpleNamespace(output_text='{"answer": "a", "findings": [], "citations": [], "questions": []}')
 
         analyzer.ask_page("text", [], "q", api_key="test-key")
 
@@ -65,6 +66,36 @@ class AnalyzerTests(unittest.TestCase):
 
         self.assertIn("ran out of output tokens", result["answer"])
         self.assertEqual(result["questions"], [])
+
+    @patch("analyzer.OpenAI")
+    def test_ask_page_keeps_only_quotes_that_appear_on_the_page(self, openai):
+        page = "Domestic cats sleep for about fifteen hours a day.\nThey purr when they are content, and sometimes when stressed."
+        client = openai.return_value.__enter__.return_value
+        client.responses.create.return_value = SimpleNamespace(
+            output_text=json.dumps(
+                {
+                    "answer": "Cats sleep a lot.",
+                    "findings": [
+                        {"point": "Cats sleep most of the day.", "quote": "\u201cDomestic cats sleep  for about fifteen hours\u201d"},
+                        {"point": "Cats fly.", "quote": "Cats can fly over tall buildings"},
+                        {"point": "  ", "quote": "ignored"},
+                    ],
+                    "citations": ["They purr when they are content", "purr", "Made-up evidence that is not there"],
+                    "questions": [],
+                }
+            )
+        )
+
+        result = analyzer.ask_page(page, [], api_key="test-key")
+
+        self.assertEqual(
+            result["findings"],
+            [
+                {"point": "Cats sleep most of the day.", "quote": "Domestic cats sleep for about fifteen hours"},
+                {"point": "Cats fly.", "quote": ""},
+            ],
+        )
+        self.assertEqual(result["citations"], ["They purr when they are content"])
 
     def test_ask_page_requires_api_key(self):
         with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):

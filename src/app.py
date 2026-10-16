@@ -119,6 +119,7 @@ password_reset_ip_limiter = SlidingWindowLimiter(10, 15 * 60)
 password_reset_email_limiter = SlidingWindowLimiter(3, 60 * 60)
 post_limiter = SlidingWindowLimiter(30, 60)
 ai_limiter = SlidingWindowLimiter(60, 60 * 60)
+AI_RATE_LIMITED_PATHS = ("/api/page", "/api/overview", "/api/ask")
 account_stores: dict[str, AccountStore] = {}
 account_stores_lock = threading.Lock()
 
@@ -378,7 +379,7 @@ def enforce_production_authentication():
                 return too_many_requests(password_reset_ip_limiter)
             reset_key = password_reset_email_key(request.form.get("email", ""))
             g.password_reset_email_throttled = not password_reset_email_limiter.hit(reset_key)
-        if request.path in ("/api/page", "/api/ask") and not ai_limiter.hit(client_key()):
+        if request.path in AI_RATE_LIMITED_PATHS and not ai_limiter.hit(client_key()):
             return too_many_requests(ai_limiter)
     return None
 
@@ -590,7 +591,7 @@ def api_page():
     try:
         soup = get_soup(url)
         if not validate_soup(soup, url):
-            return api_error("This page doesn't have enough text to read. Try an article or documentation page.", 422)
+            return api_error("WebScrapeAI can only read pages with plenty of text and at least one table. Try a longer article, such as a Wikipedia page.", 422)
         chat = {
             "url": url,
             "title": page_title(soup, url),
@@ -609,19 +610,42 @@ def api_page():
         app.logger.exception("Page read failed")
         return api_error("That page couldn't be loaded. Check the address and try again.", 502)
 
-    if ai_enabled():
-        from analyzer import ask_page
-
-        try:
-            overview = ask_page(chat["context"], [])
-            chat["messages"].append({"role": "assistant", "text": overview["answer"], "questions": overview["questions"]})
-        except Exception:
-            app.logger.exception("Page overview failed")
-            chat["messages"].append(
-                {"role": "assistant", "text": "The page loaded, but the overview didn't. Ask a question to try again.", "questions": []}
-            )
     save_page_chat(chat)
-    return public_page_chat(chat)
+    return {**public_page_chat(chat), "ai_enabled": ai_enabled()}
+
+
+def assistant_message(reply: dict[str, Any], kind: str) -> dict[str, Any]:
+    return {
+        "role": "assistant",
+        "kind": kind,
+        "text": reply["answer"],
+        "findings": reply.get("findings", []),
+        "citations": reply.get("citations", []),
+        "questions": reply.get("questions", []),
+    }
+
+
+@app.post("/api/overview")
+def api_overview():
+    if not ai_enabled():
+        return api_error("AI answers are off until OPENAI_API_KEY is set on the server.", 503)
+    chat = current_page_chat()
+    if chat is None:
+        return api_error("Read a page first, then ask about it.", 409)
+    existing = next((message for message in chat["messages"] if message.get("kind") == "overview"), None)
+    if existing:
+        return existing
+
+    from analyzer import ask_page
+
+    try:
+        reply = ask_page(chat["context"], [])
+    except Exception:
+        app.logger.exception("Page overview failed")
+        return api_error("The overview didn't come through. Try again.", 502)
+    message = assistant_message(reply, "overview")
+    chat["messages"].insert(0, message)
+    return message
 
 
 @app.post("/api/ask")
@@ -646,14 +670,12 @@ def api_ask():
     except Exception:
         app.logger.exception("Page question failed")
         return api_error("The answer didn't come through. Try asking again.", 502)
-    chat["messages"].extend(
-        [
-            {"role": "user", "text": question},
-            {"role": "assistant", "text": reply["answer"], "questions": reply["questions"]},
-        ]
-    )
-    del chat["messages"][:-20]
-    return reply
+    message = assistant_message(reply, "answer")
+    chat["messages"].extend([{"role": "user", "text": question}, message])
+    # Keep the overview plus the latest turns.
+    if len(chat["messages"]) > 21:
+        del chat["messages"][1:-20]
+    return message
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -666,7 +688,6 @@ def index():
         "selected_element": "paragraphs",
         "selected_label": ELEMENT_OPTIONS["paragraphs"],
         "table_index": 1,
-        "summary": None,
         "result": None,
         "error": None,
         "validated": False,
@@ -719,7 +740,6 @@ def index():
 
             page_data["validated"] = True
             page_data["url"] = normalized_url
-            page_data["summary"] = fetch_count(soup)
             result = get_element_data(soup, selected_element, table_index=table_number - 1)
             page_data["result"] = build_result_context(result, selected_element, selected_label, normalized_url)
             if action == "export":
