@@ -145,19 +145,3 @@ def get_soup(url):
 def validate_soup(soup, url=None):
     scraper = SmartScraper(url or "")
     return scraper._is_content_sufficient(soup)
-
-# Example usage:
-if __name__ == '__main__':
-    # URL that likely needs JS
-    # test_url = "http://quotes.toscrape.com/js/" 
-    
-    # URL that works statically
-    test_url = "http://quotes.toscrape.com/"
-
-    final_soup = get_soup(test_url)
-
-    if final_soup:
-        print("\n✅ Scraping finished. Final soup object is ready.")
-        # print(final_soup.prettify()[:500]) # Print first 500 chars
-    else:
-        print("\n❌ Scraping failed to retrieve usable content.")

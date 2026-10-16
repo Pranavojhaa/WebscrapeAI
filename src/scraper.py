@@ -1,5 +1,4 @@
 import pandas as pd
-from soup import fetch_page
 
 def scrape_table(soup):
     tables = soup.find_all('table')
@@ -33,12 +32,7 @@ def scrape_images(soup):
     return [img['src'] for img in soup.find_all('img') if 'src' in img.attrs]
 
 def scrape_links(soup):
-    links = [{'text': a.text.strip(), 'href': a['href']} for a in soup.find_all('a') if 'href' in a.attrs]
-
-    for index, link in enumerate(links):
-        print(f"[{index + 1}] Text: {link['text']} | URL: {link['href']}")
-    
-    return links
+    return [{'text': a.text.strip(), 'href': a['href']} for a in soup.find_all('a') if 'href' in a.attrs]
 
 def scrape_quotes(soup):
     quotes = soup.find_all("div", class_="quote")
@@ -46,45 +40,3 @@ def scrape_quotes(soup):
         f'{q.find("span", class_="text").text.strip()} — {q.find("small", class_="author").text.strip()}'
         for q in quotes
     ]
-
-
-
-
-if __name__ == "__main__":
-    url = "https://en.wikipedia.org/wiki/List_of_largest_companies_in_the_United_States_by_revenue"
-    print(f"\n🌐 Scraping URL: {url}")
-    url = fetch_page(url)
-
-    print("\n🧾 Scraping Tables...")
-    df = scrape_table(url)
-    if df is not None:
-        print("\n📊 Sample Table Data:")
-        print(df.head())
-    else:
-        print("❌ No tables extracted.")
-
-    print("\n📄 Scraping Paragraphs...")
-    paragraphs = scrape_paragraphs(url)
-    print(f"✅ {len(paragraphs)} paragraphs found.")
-    print("\n📝 Sample Paragraph:")
-    print(paragraphs if paragraphs else "No paragraph content found.")
-
-    print("\n🔠 Scraping Headings...")
-    headings = scrape_headings(url)
-    print(f"✅ {len(headings)} headings found.")
-    print("\n🔤 Sample Headings:")
-    print(headings if headings else "No headings found.")
-
-    print("\n🖼️ Scraping Images...")
-    images = scrape_images(url)
-    print(f"✅ {len(images)} image sources found.")
-    print("\n📷 Sample Image URLs:")
-    print(images if images else "No images found.")
-
-    print("\n🔗 Scraping Links...")
-    links = scrape_links(url)
-    print(f"✅ {len(links)} links found.")
-    print("\n🔗 Sample Links:")
-    for link in links[:5]:
-        print(f"- {link['text']}: {link['href']}")
-    print("\n✅ Scraping Completed!")

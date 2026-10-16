@@ -1,5 +1,4 @@
 from scraper import scrape_table, scrape_headings, scrape_images, scrape_links, scrape_paragraphs, scrape_quotes
-from soup import fetch_page
 from exporter import export_table, export_text_data, export_links, export_images
 
 
@@ -167,13 +166,3 @@ def inspect_element(soup):
             break
         else:
             print("❌ Invalid choice. Returning to main inspection.")
-
-
-if __name__ == "__main__":
-    url = "https://en.wikipedia.org/wiki/List_of_largest_companies_in_the_United_States_by_revenue"
-    soup = fetch_page(url)
-    summary = fetch_count(soup)
-    print("\n🔍 Website Inspection Result:")
-    for k, v in summary.items():
-        print(f"{k.capitalize()}: {v}")
-    inspect_element(soup)
