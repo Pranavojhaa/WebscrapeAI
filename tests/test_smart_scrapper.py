@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from types import SimpleNamespace
 
 import smart_scrapper
+import requests
 from bs4 import BeautifulSoup
+from network import URLSafetyError
 from smart_scrapper import SmartScraper, dynamic_rendering_enabled, validate_soup
 
 
@@ -46,6 +48,38 @@ class ContentSufficiencyTests(unittest.TestCase):
         ):
             with self.subTest(html=html[:40]):
                 self.assertFalse(validate_soup(BeautifulSoup(html, "html.parser")))
+
+
+class FallbackTests(unittest.TestCase):
+    ARTICLE = BeautifulSoup(f"<p>{'Rendered paragraph text. ' * 60}</p>", "html.parser")
+
+    def test_failed_static_fetch_falls_back_to_browser(self):
+        scraper = SmartScraper("https://example.test")
+        with (
+            patch.object(scraper, "_get_static_soup", side_effect=requests.HTTPError("403")),
+            patch.object(scraper, "_get_dynamic_soup", return_value=self.ARTICLE) as dynamic,
+        ):
+            self.assertIs(scraper.get_soup(), self.ARTICLE)
+        dynamic.assert_called_once()
+
+    def test_failed_static_fetch_reraises_when_browser_is_off(self):
+        scraper = SmartScraper("https://example.test")
+        with (
+            patch.object(scraper, "_get_static_soup", side_effect=requests.HTTPError("403")),
+            patch.object(smart_scrapper, "dynamic_rendering_enabled", return_value=False),
+            self.assertRaises(requests.HTTPError),
+        ):
+            scraper.get_soup()
+
+    def test_blocked_url_never_reaches_browser(self):
+        scraper = SmartScraper("http://10.0.0.1")
+        with (
+            patch.object(scraper, "_get_static_soup", side_effect=URLSafetyError("blocked")),
+            patch.object(scraper, "_get_dynamic_soup") as dynamic,
+            self.assertRaises(URLSafetyError),
+        ):
+            scraper.get_soup()
+        dynamic.assert_not_called()
 
 
 class DynamicRenderingTests(unittest.TestCase):

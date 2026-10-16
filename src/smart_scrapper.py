@@ -1,6 +1,7 @@
 import os
 import shutil
 
+import requests
 from bs4 import BeautifulSoup
 from network import MAX_RESPONSE_BYTES, fetch_public_html
 
@@ -132,14 +133,18 @@ class SmartScraper:
         """
         Main entry point to get soup. Tries static, then falls back to dynamic.
         """
-        soup = self._get_static_soup()
+        try:
+            soup = self._get_static_soup()
+        except requests.RequestException:
+            # HTTP and connection errors (bot blocks, 403s) get a browser retry. URLSafetyError
+            # is not a RequestException, so blocked, oversized or non-HTML pages never reach Chrome.
+            soup = self._get_dynamic_soup()
+            if soup is None:
+                raise
+            return self._clean_soup(soup)
 
         if not self._is_content_sufficient(soup):
-            dynamic_soup = self._get_dynamic_soup()
-            if dynamic_soup:
-                soup = dynamic_soup
-            else:
-                pass
+            soup = self._get_dynamic_soup() or soup
 
         return self._clean_soup(soup)
 
