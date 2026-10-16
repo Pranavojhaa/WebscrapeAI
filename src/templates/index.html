@@ -1,9 +1,25 @@
+{#- Icons are the exact SVG paths from the Figma Make design (Visual Hierarchy Enhancement). -#}
+{% macro icon(name) -%}
+    {%- if name == "external" -%}
+        <svg aria-hidden="true" class="icon" fill="none" height="16" viewBox="0 0 24 24" width="16"><path d="M14 5h5v5M19 5l-8 8M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/></svg>
+    {%- elif name == "chevron" -%}
+        <svg aria-hidden="true" class="icon" fill="none" height="16" viewBox="0 0 24 24" width="16"><path d="m8 10 4 4 4-4" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/></svg>
+    {%- elif name == "spark" -%}
+        <svg aria-hidden="true" class="icon" fill="none" height="16" viewBox="0 0 24 24" width="16"><path d="M12 3c.5 4.6 2.4 6.5 7 7-4.6.5-6.5 2.4-7 7-.5-4.6-2.4-6.5-7-7 4.6-.5 6.5-2.4 7-7Z" stroke="currentColor" stroke-linejoin="round" stroke-width="1.6"/></svg>
+    {%- elif name == "send" -%}
+        <svg aria-hidden="true" class="icon" fill="none" height="17" viewBox="0 0 24 24" width="17"><path d="m21 3-8.2 18-2.1-7.7L3 11.2 21 3Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/><path d="m10.7 13.3 4.6-4.6" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"/></svg>
+    {%- elif name == "arrow" -%}
+        <svg aria-hidden="true" class="icon" fill="none" height="18" viewBox="0 0 24 24" width="18"><path d="m9 18 6-6-6-6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/></svg>
+    {%- elif name == "check" -%}
+        <svg aria-hidden="true" class="icon" fill="none" height="16" viewBox="0 0 24 24" width="16"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg>
+    {%- endif -%}
+{%- endmacro %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#ffffff">
+    <meta name="theme-color" content="#f5f6f2">
     <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{{ chat.title ~ " – WebScrapeAI" if chat else "WebScrapeAI" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
@@ -12,7 +28,10 @@
 <body class="{{ 'has-page' if chat or data_open else '' }}">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="topbar">
-        <a class="wordmark" href="{{ url_for('index') }}" translate="no">WebScrapeAI</a>
+        <a class="brand" href="{{ url_for('index') }}" aria-label="WebScrapeAI home">
+            <span class="brand-mark" aria-hidden="true">W</span>
+            <span translate="no">WebScrapeAI</span>
+        </a>
         {% if current_user %}
             <nav class="account" aria-label="Account">
                 <span class="account-email" translate="no">{{ current_user.email }}</span>
@@ -25,223 +44,264 @@
         {% endif %}
     </header>
 
-    <main id="main" class="shell">
+    <main id="main" class="app-main">
         <section class="intake" aria-labelledby="intake-title">
             <div class="intake-copy">
+                <div class="eyebrow accent">New research session</div>
                 <h1 id="intake-title">Read a webpage, then question it.</h1>
-                <p class="lede">Paste a public link. WebScrapeAI reads the page, pulls out key findings with quotes from the text, and suggests what to ask next.</p>
+                <p class="lede">Paste a public link. WebScrapeAI reads the page, pulls out key findings backed by quotes from the text, and suggests what to ask next.</p>
             </div>
 
             <form id="read-form" class="address" novalidate>
-                <label class="visually-hidden" for="page-url">Webpage address</label>
-                <input
-                    id="page-url"
-                    name="url"
-                    type="text"
-                    inputmode="url"
-                    autocomplete="url"
-                    autocapitalize="off"
-                    spellcheck="false"
-                    maxlength="2048"
-                    placeholder="en.wikipedia.org/wiki/Web_scraping…"
-                    value="{{ chat.url if chat else '' }}"
-                    translate="no"
-                    {% if not chat %}autofocus{% endif %}
-                >
-                <button id="read-button" type="submit" class="accent-button">
-                    <span class="spinner" aria-hidden="true"></span>
-                    <span class="button-label">Read page</span>
-                </button>
+                <label class="address-label" for="page-url">Webpage address</label>
+                <div class="address-row">
+                    <input
+                        id="page-url"
+                        name="url"
+                        type="text"
+                        inputmode="url"
+                        autocomplete="url"
+                        autocapitalize="off"
+                        spellcheck="false"
+                        maxlength="2048"
+                        placeholder="en.wikipedia.org/wiki/Web_scraping…"
+                        value="{{ chat.url if chat else '' }}"
+                        translate="no"
+                        {% if not chat %}autofocus{% endif %}
+                    >
+                    <button id="read-button" type="submit" class="primary-button">
+                        <span class="spinner light" aria-hidden="true"></span>
+                        <span class="button-label">Read page</span>
+                    </button>
+                </div>
             </form>
             <p id="read-status" class="status" role="status" aria-live="polite"></p>
             <div id="read-error" class="alert" role="alert" hidden>
                 <p class="alert-text"></p>
-                <button type="button" class="quiet-button" id="read-retry">Try again</button>
-            </div>
-
-            <div class="examples">
-                <p class="examples-label" id="examples-label">Or start with one of these pages</p>
-                <ul class="example-list" aria-labelledby="examples-label">
-                    <li><button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Web_scraping"><span class="example-title">Web scraping</span><span class="example-host" translate="no">en.wikipedia.org</span></button></li>
-                    <li><button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Photosynthesis"><span class="example-title">Photosynthesis</span><span class="example-host" translate="no">en.wikipedia.org</span></button></li>
-                    <li><button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol"><span class="example-title">HTTP</span><span class="example-host" translate="no">en.wikipedia.org</span></button></li>
-                </ul>
+                <button type="button" class="secondary-button" id="read-retry">Try again</button>
             </div>
         </section>
 
-        <section class="primer" aria-label="How WebScrapeAI works">
-            <div class="steps">
-                <h2>How it works</h2>
-                <ol class="step-list">
-                    <li><strong>Paste a public link.</strong> Text-rich pages like articles, documentation and Wikipedia entries work best. Private and local addresses are blocked.</li>
-                    <li><strong>WebScrapeAI reads the page.</strong> The server fetches the page text and counts its headings, paragraphs, links, images and tables.</li>
-                    <li><strong>Question it.</strong> You get an overview, key findings backed by quotes from the page, and follow-up questions you can click.</li>
+        <div class="intro">
+            <aside class="source-panel how-panel" aria-labelledby="how-title">
+                <div class="eyebrow">How it works</div>
+                <h2 id="how-title" class="panel-title">From link to answers in three steps</h2>
+                <ol class="numbered-list">
+                    <li><span>01</span><p><strong>Paste a public link.</strong> Text-rich pages like articles, documentation and Wikipedia entries work best. Private and local addresses are blocked.</p></li>
+                    <li><span>02</span><p><strong>WebScrapeAI reads the page.</strong> The server fetches the page text and counts its headings, paragraphs, links, images and tables.</p></li>
+                    <li><span>03</span><p><strong>Question it.</strong> You get an overview, key findings backed by quotes from the page, and follow-up questions you can click.</p></li>
                 </ol>
                 {% if not ai_enabled %}
-                    <p class="note">AI answers are off until <code translate="no">OPENAI_API_KEY</code> is set on the server. You can still read pages and export their data.</p>
+                    <p class="control-note">AI answers are off until <code translate="no">OPENAI_API_KEY</code> is set on the server. You can still read pages and extract their data.</p>
                 {% endif %}
+            </aside>
+
+            <div class="intro-main">
+                <section class="follow-up examples" aria-labelledby="examples-title">
+                    <div class="follow-up-heading">
+                        <div class="eyebrow">Start here</div>
+                        <h3 id="examples-title">Example pages</h3>
+                    </div>
+                    <div class="suggestion-list">
+                        <button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Web_scraping"><span>01</span><span class="example-text">Web scraping<small translate="no">en.wikipedia.org</small></span>{{ icon("arrow") }}</button>
+                        <button type="button" class="example" data-url="https://en.wikipedia.org/wiki/Photosynthesis"><span>02</span><span class="example-text">Photosynthesis<small translate="no">en.wikipedia.org</small></span>{{ icon("arrow") }}</button>
+                        <button type="button" class="example" data-url="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview"><span>03</span><span class="example-text">An overview of HTTP<small translate="no">developer.mozilla.org</small></span>{{ icon("arrow") }}</button>
+                    </div>
+                </section>
+
+                <figure class="sample" aria-labelledby="sample-caption">
+                    <figcaption id="sample-caption">
+                        <span class="sample-tag">Sample result</span>
+                        Illustrative content, not from a real page.
+                    </figcaption>
+                    <div class="sample-body">
+                        <div class="eyebrow accent">Research overview</div>
+                        <p class="sample-headline">A one-line takeaway from the page appears here.</p>
+                        <div class="answer-block">
+                            <div class="answer-kicker"><span class="answer-check">{{ icon("check") }}</span>Answer</div>
+                            <p class="sample-answer">Each answer leads with a direct sentence, then the detail behind it.</p>
+                            <div class="answer-copy"><p>Quotes shown as evidence are checked word for word against the page text. Quotes that can’t be found are left out.</p></div>
+                        </div>
+                    </div>
+                </figure>
             </div>
+        </div>
 
-            <figure class="sample" aria-labelledby="sample-caption">
-                <figcaption id="sample-caption"><span class="sample-tag">Sample</span> Illustrative content, not from a real page.</figcaption>
-                <div class="sample-body">
-                    <p class="source-host" translate="no">example.org/field-notes</p>
-                    <p class="sample-title">Field notes on keeping bees on a city rooftop</p>
-                    <p class="sample-overview">A short overview appears here: what the page covers, who it is for and what it concludes.</p>
-                    <p class="sample-heading">Key findings</p>
-                    <ul class="finding-list">
-                        <li><p class="finding-point">Each finding is one plain sentence.</p><p class="quote"><mark>“A quote copied word for word from the page backs it up.”</mark></p></li>
-                        <li><p class="finding-point">Quotes that can’t be found on the page are left out.</p></li>
-                    </ul>
-                    <p class="sample-heading">Ask next</p>
-                    <ul class="sample-questions">
-                        <li>What does a first hive need?</li>
-                        <li>Where should a rooftop hive face?</li>
-                    </ul>
-                </div>
-            </figure>
-        </section>
-
-        <div id="workspace" class="workspace" {% if not chat %}hidden{% endif %}>
+        <div id="workspace" class="workspace" {% if not chat and not data_open %}hidden{% endif %}>
             <a class="source-strip" href="#source">
                 <span class="strip-host" id="strip-host" translate="no"></span>
                 <span class="strip-title" id="strip-title"></span>
             </a>
 
-            <aside id="source" class="source" aria-labelledby="source-title">
-                <p class="source-host" id="source-host" translate="no"></p>
-                <h2 class="source-title" id="source-title"></h2>
-                <a class="source-url" id="source-url" href="#" target="_blank" rel="noreferrer" translate="no"></a>
-                <ul class="source-counts" id="source-counts" aria-label="What the page contains"></ul>
+            <aside id="source" class="source-panel" aria-labelledby="source-title">
+                <div class="eyebrow">Source</div>
+                <h2 class="source-title" id="source-title" tabindex="-1"></h2>
+                <a class="source-domain" id="source-link" href="#" target="_blank" rel="noreferrer">
+                    <span id="source-host" translate="no"></span>{{ icon("external") }}
+                </a>
+                <p class="source-url" id="source-url" translate="no"></p>
+
+                <dl class="source-stats" id="source-stats" aria-label="What the page contains"></dl>
+
                 <section class="findings" aria-labelledby="findings-title">
-                    <h3 id="findings-title">Key findings</h3>
+                    <div class="section-heading">
+                        <h2 id="findings-title">Key findings</h2>
+                        <span id="findings-count" hidden></span>
+                    </div>
                     <div id="findings" aria-live="polite"></div>
                 </section>
-                <a class="data-link" id="data-link" href="#data-panel">Extracted data and exports</a>
+
+                <form method="post" action="{{ url_for('index') }}" class="extract-controls data-form" id="extract-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="url" id="data-url" value="{{ url }}">
+                    <input type="hidden" name="action" value="inspect">
+                    <label for="element">Extract from source</label>
+                    <div class="select-wrap">
+                        <select id="element" name="element">
+                            {% for value, label in element_options.items() %}
+                                <option value="{{ value }}" {% if value == selected_element %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        {{ icon("chevron") }}
+                    </div>
+                    <div class="field-group" id="table-field" {% if selected_element != "table" %}hidden{% endif %}>
+                        <label for="table_index">Table number</label>
+                        <input id="table_index" name="table_index" type="text" inputmode="numeric" placeholder="e.g. 2" value="{{ table_index }}">
+                    </div>
+                    <button class="secondary-button" id="extract-button" type="submit">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span class="button-icon">{{ icon("spark") }}</span>
+                        <span class="button-label">Run extraction</span>
+                    </button>
+                    <p class="control-note" id="extract-note" aria-live="polite">Lists what WebScrapeAI found on this page, ready to download.</p>
+                </form>
             </aside>
 
-            <section class="conversation" aria-label="Questions and answers">
-                <ol class="thread" id="thread"></ol>
-                {% if ai_enabled %}
-                    <form id="ask-form" class="ask" novalidate>
-                        <label class="visually-hidden" for="question">Question about this page</label>
-                        <input id="question" name="question" type="text" maxlength="500" autocomplete="off" placeholder="Ask about this page…">
-                        <button id="ask-button" type="submit" class="accent-button">
-                            <span class="spinner" aria-hidden="true"></span>
-                            <span class="button-label">Ask</span>
-                        </button>
-                    </form>
-                    <p id="ask-error" class="field-error" role="alert" hidden></p>
-                {% endif %}
-            </section>
-        </div>
+            <article class="answer-column" aria-label="Research">
+                <div id="thread" class="thread"></div>
 
-        <details id="data-panel" class="data-panel" {% if data_open %}open{% endif %} {% if not chat and not data_open %}hidden{% endif %}>
-            <summary>Extracted data and exports</summary>
-            <form method="post" action="{{ url_for('index') }}" class="data-form">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="url" id="data-url" value="{{ url }}">
-                <div class="field">
-                    <label for="element">Show</label>
-                    <select id="element" name="element">
-                        {% for value, label in element_options.items() %}
-                            <option value="{{ value }}" {% if value == selected_element %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="field field-narrow">
-                    <label for="table_index">Table number</label>
-                    <input id="table_index" name="table_index" type="text" inputmode="numeric" value="{{ table_index }}">
-                </div>
-                <button type="submit" name="action" value="inspect" class="quiet-button">Show data</button>
-            </form>
+                <section class="follow-up" id="follow-up" aria-labelledby="follow-up-title" hidden>
+                    <div class="follow-up-heading">
+                        <div class="eyebrow">Continue exploring</div>
+                        <h3 id="follow-up-title">Suggested questions</h3>
+                    </div>
+                    <div class="suggestion-list" id="suggestions" role="group" aria-labelledby="follow-up-title"></div>
 
-            {% if error %}
-                <p class="field-error" role="alert">{{ error }}</p>
-            {% endif %}
-
-            {% if result %}
-                <div class="data-result">
-                    <p class="data-count">{{ result.count }} {{ (result.label[:-1] if result.count == 1 else result.label)|lower }}</p>
-
-                    {% if result.kind == "table" %}
-                        <div class="table-wrap">
-                            <table>
-                                <thead>
-                                    <tr>{% for header in result.headers %}<th scope="col">{{ header }}</th>{% endfor %}</tr>
-                                </thead>
-                                <tbody>
-                                    {% for row in result.rows %}
-                                        <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% elif result.kind == "links" %}
-                        <ul class="data-list">
-                            {% for item in result['items'] %}
-                                <li>
-                                    <span>{{ item.text or "Untitled link" }}</span>
-                                    {% if item.href.startswith(("http://", "https://")) %}
-                                        <a href="{{ item.href }}" target="_blank" rel="noreferrer">{{ item.href }}</a>
-                                    {% else %}
-                                        <span class="data-muted">{{ item.href }}</span>
-                                    {% endif %}
-                                </li>
-                            {% endfor %}
-                        </ul>
-                    {% elif result.kind == "images" %}
-                        <ul class="image-results">
-                            {% for item in result['items'] %}
-                                <li>
-                                    {% if item.url %}
-                                        <a href="{{ item.url }}" target="_blank" rel="noreferrer">
-                                            {% if item.preview %}
-                                                <img src="{{ item.url }}" alt="" width="160" height="120" loading="lazy" referrerpolicy="no-referrer">
-                                            {% endif %}
-                                            <span>{{ item.label }}</span>
-                                        </a>
-                                    {% else %}
-                                        <span>{{ item.label }}</span>
-                                    {% endif %}
-                                </li>
-                            {% endfor %}
-                        </ul>
-                    {% elif result.kind == "list" %}
-                        <ul class="data-list">
-                            {% for item in result['items'] %}<li>{{ item.content }}</li>{% endfor %}
-                        </ul>
-                    {% else %}
-                        <p class="data-muted">Nothing of this type was found on the page. Try another option above.</p>
+                    {% if ai_enabled %}
+                        <form class="composer" id="ask-form" novalidate>
+                            <label for="question">Ask about this source</label>
+                            <div class="composer-row">
+                                <textarea id="question" name="question" rows="2" maxlength="500" placeholder="Ask a follow-up question…"></textarea>
+                                <button id="ask-button" type="submit" aria-label="Ask question">
+                                    <span class="spinner light" aria-hidden="true"></span>
+                                    <span class="button-icon">{{ icon("send") }}</span>
+                                </button>
+                            </div>
+                            <p id="ask-hint" aria-live="polite">Enter adds a new line. Press Ctrl+Enter to ask.</p>
+                        </form>
+                        <p id="ask-error" class="field-error" role="alert" hidden></p>
                     {% endif %}
-                </div>
+                </section>
 
-                {% if validated %}
-                    <form method="post" action="{{ url_for('index') }}" class="data-form export-form">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <input type="hidden" name="url" value="{{ url }}">
-                        <input type="hidden" name="element" value="{{ selected_element }}">
-                        <input type="hidden" name="table_index" value="{{ table_index }}">
-                        <div class="field">
-                            <label for="export_format">Format</label>
-                            <select id="export_format" name="export_format">
-                                {% if result.kind == "table" %}
-                                    <option value="csv">CSV</option>
-                                    <option value="json">JSON</option>
-                                    <option value="xlsx">Excel</option>
-                                {% else %}
-                                    <option value="json">JSON</option>
-                                    <option value="txt">Text</option>
-                                {% endif %}
-                            </select>
+                {% if result or error %}
+                    <section class="extracted" id="extracted" aria-labelledby="extracted-title">
+                        <div class="evidence-heading">
+                            <div>
+                                <div class="eyebrow">Extracted from source</div>
+                                <h3 id="extracted-title">{% if result %}{{ result.count }} {{ (result.label[:-1] if result.count == 1 else result.label)|lower }}{% else %}Extraction{% endif %}</h3>
+                            </div>
                         </div>
-                        <button type="submit" name="action" value="export" class="quiet-button">Download results</button>
-                    </form>
+
+                        {% if error %}
+                            <p class="field-error" role="alert">{{ error }}</p>
+                        {% endif %}
+
+                        {% if result %}
+                            <div class="data-result">
+                                {% if result.kind == "table" %}
+                                    <div class="table-wrap">
+                                        <table>
+                                            <thead>
+                                                <tr>{% for header in result.headers %}<th scope="col">{{ header }}</th>{% endfor %}</tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for row in result.rows %}
+                                                    <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                {% elif result.kind == "links" %}
+                                    <ul class="data-list">
+                                        {% for item in result['items'] %}
+                                            <li>
+                                                <span>{{ item.text or "Untitled link" }}</span>
+                                                {% if item.href.startswith(("http://", "https://")) %}
+                                                    <a href="{{ item.href }}" target="_blank" rel="noreferrer">{{ item.href }}</a>
+                                                {% else %}
+                                                    <span class="data-muted">{{ item.href }}</span>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% elif result.kind == "images" %}
+                                    <ul class="image-results">
+                                        {% for item in result['items'] %}
+                                            <li>
+                                                {% if item.url %}
+                                                    <a href="{{ item.url }}" target="_blank" rel="noreferrer">
+                                                        {% if item.preview %}
+                                                            <img src="{{ item.url }}" alt="" width="160" height="120" loading="lazy" referrerpolicy="no-referrer">
+                                                        {% endif %}
+                                                        <span>{{ item.label }}</span>
+                                                    </a>
+                                                {% else %}
+                                                    <span>{{ item.label }}</span>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% elif result.kind == "list" %}
+                                    <ul class="data-list">
+                                        {% for item in result['items'] %}<li>{{ item.content }}</li>{% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <p class="data-muted">Nothing of this type was found on the page. Pick another option under Extract from source.</p>
+                                {% endif %}
+                            </div>
+
+                            {% if validated %}
+                                <form method="post" action="{{ url_for('index') }}" class="data-form export-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="url" value="{{ url }}">
+                                    <input type="hidden" name="element" value="{{ selected_element }}">
+                                    <input type="hidden" name="table_index" value="{{ table_index }}">
+                                    <div class="field-group">
+                                        <label for="export_format">Download as</label>
+                                        <div class="select-wrap">
+                                            <select id="export_format" name="export_format">
+                                                {% if result.kind == "table" %}
+                                                    <option value="csv">CSV</option>
+                                                    <option value="json">JSON</option>
+                                                    <option value="xlsx">Excel</option>
+                                                {% else %}
+                                                    <option value="json">JSON</option>
+                                                    <option value="txt">Text</option>
+                                                {% endif %}
+                                            </select>
+                                            {{ icon("chevron") }}
+                                        </div>
+                                    </div>
+                                    <button type="submit" name="action" value="export" class="secondary-button">Download results</button>
+                                </form>
+                            {% endif %}
+                        {% endif %}
+                    </section>
                 {% endif %}
-            {% endif %}
-        </details>
+            </article>
+        </div>
     </main>
 
-    <script type="application/json" id="page-state">{{ {"chat": chat, "aiEnabled": ai_enabled}|tojson }}</script>
+    <script type="application/json" id="page-state">{{ {"chat": chat, "aiEnabled": ai_enabled, "url": url}|tojson }}</script>
 </body>
 </html>

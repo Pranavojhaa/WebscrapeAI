@@ -618,6 +618,7 @@ def assistant_message(reply: dict[str, Any], kind: str) -> dict[str, Any]:
     return {
         "role": "assistant",
         "kind": kind,
+        "headline": reply.get("headline", ""),
         "text": reply["answer"],
         "findings": reply.get("findings", []),
         "citations": reply.get("citations", []),

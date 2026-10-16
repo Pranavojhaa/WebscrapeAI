@@ -329,6 +329,7 @@ class WebAppTests(unittest.TestCase):
         soup = BeautifulSoup("<title>Cats</title><h1>All about cats</h1><p>Cats purr.</p>", "html.parser")
         replies = [
             {
+                "headline": "Cats purr and nap.",
                 "answer": "A page about cats.",
                 "findings": [{"point": "Cats purr.", "quote": "Cats purr."}],
                 "citations": [],
@@ -358,6 +359,7 @@ class WebAppTests(unittest.TestCase):
         self.assertNotIn("context", body)
         self.assertEqual(overview.get_json()["questions"], ["Why do cats purr?", "What do cats eat?"])
         self.assertEqual(overview.get_json()["findings"], [{"point": "Cats purr.", "quote": "Cats purr."}])
+        self.assertEqual(overview.get_json()["headline"], "Cats purr and nap.")
         self.assertEqual(overview_again.get_json(), overview.get_json())
         self.assertIn(b"A page about cats.", home.data)
         self.assertEqual(answer.get_json()["citations"], ["Cats purr."])

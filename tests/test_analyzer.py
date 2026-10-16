@@ -16,13 +16,16 @@ class AnalyzerTests(unittest.TestCase):
     def test_ask_page_sends_page_history_and_question(self, openai):
         client = openai.return_value.__enter__.return_value
         client.responses.create.return_value = SimpleNamespace(
-            output_text='{"answer": "It is about cats.", "findings": [], "citations": [], "questions": ["Who wrote it?", "  ", "When?"]}'
+            output_text='{"headline": " Cats. ", "answer": "It is about cats.", "findings": [], "citations": [], "questions": ["Who wrote it?", "  ", "When?"]}'
         )
         history = [{"role": "user", "content": "First?"}, {"role": "assistant", "content": "First answer."}]
 
         result = analyzer.ask_page("Cats page", history, "What is it about?", api_key="test-key", model="test-model")
 
-        self.assertEqual(result, {"answer": "It is about cats.", "findings": [], "citations": [], "questions": ["Who wrote it?", "When?"]})
+        self.assertEqual(
+            result,
+            {"headline": "Cats.", "answer": "It is about cats.", "findings": [], "citations": [], "questions": ["Who wrote it?", "When?"]},
+        )
         openai.assert_called_once_with(api_key="test-key", timeout=30, max_retries=0)
         request = client.responses.create.call_args.kwargs
         self.assertEqual(request["model"], "test-model")
