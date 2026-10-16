@@ -10,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from types import SimpleNamespace
 
 import smart_scrapper
-from smart_scrapper import SmartScraper, dynamic_rendering_enabled
+from bs4 import BeautifulSoup
+from smart_scrapper import SmartScraper, dynamic_rendering_enabled, validate_soup
 
 
 class DynamicRenderingConfigurationTests(unittest.TestCase):
@@ -30,6 +31,21 @@ class DynamicRenderingConfigurationTests(unittest.TestCase):
         ):
             with self.subTest(environment=environment), patch.dict(os.environ, environment, clear=True):
                 self.assertFalse(dynamic_rendering_enabled())
+
+
+class ContentSufficiencyTests(unittest.TestCase):
+    def test_article_without_tables_is_accepted(self):
+        paragraphs = "".join(f"<p>{'Paragraph text about HTTP. ' * 8}</p>" for _ in range(10))
+        soup = BeautifulSoup(f"<html><body><h1>Overview</h1>{paragraphs}</body></html>", "html.parser")
+        self.assertTrue(validate_soup(soup))
+
+    def test_near_empty_and_script_only_pages_are_rejected(self):
+        for html in (
+            "<html><body><p>Loading…</p></body></html>",
+            f"<html><body><div id='root'></div><script>{'var x = 1;' * 500}</script></body></html>",
+        ):
+            with self.subTest(html=html[:40]):
+                self.assertFalse(validate_soup(BeautifulSoup(html, "html.parser")))
 
 
 class DynamicRenderingTests(unittest.TestCase):

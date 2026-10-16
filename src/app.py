@@ -591,7 +591,7 @@ def api_page():
     try:
         soup = get_soup(url)
         if not validate_soup(soup, url):
-            return api_error("WebScrapeAI can only read pages with plenty of text and at least one table. Try a longer article, such as a Wikipedia page.", 422)
+            return api_error("WebScrapeAI couldn't find enough readable text on this page. Try a longer article or documentation page.", 422)
         chat = {
             "url": url,
             "title": page_title(soup, url),

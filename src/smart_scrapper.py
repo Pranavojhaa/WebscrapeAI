@@ -48,6 +48,8 @@ class SmartScraper:
         (By.CLASS_NAME, "result-list"),
     ]
 
+    MIN_PARAGRAPH_CHARS = 1000
+
     def __init__(self, url):
         self.url = url
 
@@ -110,7 +112,12 @@ class SmartScraper:
         # Check for tag-based selectors
         has_content_tag = has_content_tag or any(soup.find(tag_name) for by_type, tag_name in self.CONTENT_SELECTORS if by_type == By.TAG_NAME)
 
-        return has_content_tag and text_size > 1000
+        if has_content_tag and text_size > 1000:
+            return True
+        # Articles and docs without tables: count only paragraph text, so script-only
+        # shells and pages that are mostly navigation still fall through.
+        paragraph_size = sum(len(p.get_text(strip=True)) for p in soup.find_all("p"))
+        return paragraph_size >= self.MIN_PARAGRAPH_CHARS
 
     def _clean_soup(self, soup):
         """Removes non-content tags from the parsed document."""
