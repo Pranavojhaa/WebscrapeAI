@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 import pandas as pd
 import requests
@@ -387,7 +387,7 @@ def add_security_headers(response):
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+        "default-src 'self'; img-src 'self' https:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     )
     response.headers.setdefault("X-Frame-Options", "DENY")
     if request.path in ("/login", "/password-reset", "/password-reset/confirm"):
@@ -404,7 +404,9 @@ def normalize_url(url: str) -> str:
     return cleaned
 
 
-def build_result_context(result: Any, selected_element: str, selected_label: str) -> dict[str, Any]:
+def build_result_context(
+    result: Any, selected_element: str, selected_label: str, page_url: str = ""
+) -> dict[str, Any]:
     context: dict[str, Any] = {
         "label": selected_label,
         "count": 0,
@@ -442,6 +444,20 @@ def build_result_context(result: Any, selected_element: str, selected_label: str
                 "items": items,
             }
         )
+        return context
+
+    if selected_element == "images":
+        items = []
+        for source in result:
+            url = urljoin(page_url, str(source).strip())
+            scheme = urlsplit(url).scheme.lower()
+            if scheme not in ("http", "https"):
+                items.append({"url": "", "label": str(source)[:200], "preview": False})
+                continue
+            label = unquote(urlsplit(url).path.rsplit("/", 1)[-1]) or url
+            # Only https previews: http images would be mixed content on the HTTPS app.
+            items.append({"url": url, "label": label, "preview": scheme == "https"})
+        context.update({"count": len(items), "kind": "images", "items": items})
         return context
 
     items = [{"content": str(item)} for item in result]
@@ -564,7 +580,7 @@ def index():
             page_data["url"] = normalized_url
             page_data["summary"] = fetch_count(soup)
             result = get_element_data(soup, selected_element, table_index=table_number - 1)
-            page_data["result"] = build_result_context(result, selected_element, selected_label)
+            page_data["result"] = build_result_context(result, selected_element, selected_label, normalized_url)
             if action == "export":
                 return build_export_response(result, selected_element, request.form.get("export_format", "json"))
             if action == "analyze":

@@ -250,6 +250,34 @@ class WebAppTests(unittest.TestCase):
         self.assertIn(b"A title", response.data)
         self.assertIn(b"Download results", response.data)
 
+    def test_image_results_resolve_urls_and_preview_only_https(self):
+        sources = [
+            "//upload.example.test/a/Poster.jpg?x=1",
+            "/static/logo.png",
+            "http://plain.example.test/old.gif",
+            "data:image/png;base64,AAAA",
+            "javascript:alert(1)",
+        ]
+        with (
+            patch.object(web_app, "get_soup", return_value=object()),
+            patch.object(web_app, "validate_soup", return_value=True),
+            patch.object(web_app, "fetch_count", return_value={"images": len(sources)}),
+            patch.object(web_app, "get_element_data", return_value=sources),
+        ):
+            response = self.client.post(
+                "/",
+                data={"url": "https://site.example.test/wiki/Page", "element": "images", "action": "inspect", "csrf_token": self.csrf_token},
+            )
+
+        page = response.data.decode()
+        self.assertIn('<img src="https://upload.example.test/a/Poster.jpg?x=1"', page)
+        self.assertIn('href="https://site.example.test/static/logo.png"', page)
+        self.assertIn('href="http://plain.example.test/old.gif"', page)
+        self.assertNotIn('<img src="http://', page)
+        self.assertNotIn('src="data:', page)
+        self.assertNotIn('href="javascript:', page)
+        self.assertIn("img-src 'self' https:", response.headers["Content-Security-Policy"])
+
     def test_rejects_unsupported_element_before_fetching(self):
         with patch.object(web_app, "get_soup") as get_soup:
             response = self.client.post(

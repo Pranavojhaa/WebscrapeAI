@@ -125,6 +125,23 @@
                             </li>
                         {% endfor %}
                     </ul>
+                {% elif result.kind == "images" %}
+                    <ul class="image-results">
+                        {% for item in result['items'] %}
+                            <li>
+                                {% if item.url %}
+                                    <a href="{{ item.url }}" target="_blank" rel="noreferrer">
+                                        {% if item.preview %}
+                                            <img src="{{ item.url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+                                        {% endif %}
+                                        <span>{{ item.label }}</span>
+                                    </a>
+                                {% else %}
+                                    <span>{{ item.label }}</span>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
                 {% elif result.kind == "list" %}
                     <ul class="result-list">
                         {% for item in result['items'] %}
