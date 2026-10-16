@@ -36,6 +36,29 @@ class AnalyzerTests(unittest.TestCase):
         request = client.responses.create.call_args.kwargs
         self.assertEqual(len(request["input"]), analyzer.MAX_ANALYSIS_CHARS)
 
+    @patch("analyzer.OpenAI")
+    def test_analysis_leaves_room_for_reasoning_models(self, openai):
+        # gpt-5-mini spent ~450 of a 500-token budget on reasoning and returned no text.
+        client = openai.return_value.__enter__.return_value
+        client.responses.create.return_value = SimpleNamespace(output_text="summary")
+
+        analyzer.analyze_scraped_data("text", api_key="test-key")
+
+        request = client.responses.create.call_args.kwargs
+        self.assertGreaterEqual(request["max_output_tokens"], 2000)
+        self.assertEqual(request["reasoning"], {"effort": "low"})
+
+    @patch("analyzer.OpenAI")
+    def test_analysis_explains_an_empty_truncated_response(self, openai):
+        client = openai.return_value.__enter__.return_value
+        client.responses.create.return_value = SimpleNamespace(
+            output_text="", status="incomplete", incomplete_details=SimpleNamespace(reason="max_output_tokens")
+        )
+
+        result = analyzer.analyze_scraped_data("text", api_key="test-key")
+
+        self.assertIn("ran out of output tokens", result)
+
     def test_analysis_requires_api_key(self):
         with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
             analyzer.analyze_scraped_data("text")
