@@ -187,7 +187,8 @@ def ensure_account_store() -> AccountStore:
     store = get_account_store()
     store.initialize(
         os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""),
-        os.getenv("BOOTSTRAP_ADMIN_PASSWORD", ""),
+        # Secret files often end in a newline nobody can type into a password field.
+        os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").rstrip("\r\n"),
     )
     return store
 
