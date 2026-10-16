@@ -27,6 +27,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from account_store import AccountStore, AccountStoreError
 from inspector import fetch_count, get_element_data
 from network import URLSafetyError
+from scraper import scrape_headings, scrape_paragraphs
 from smart_scrapper import get_soup, validate_soup
 
 load_dotenv()
@@ -117,7 +118,7 @@ login_request_limiter = SlidingWindowLimiter(30, 15 * 60)
 password_reset_ip_limiter = SlidingWindowLimiter(10, 15 * 60)
 password_reset_email_limiter = SlidingWindowLimiter(3, 60 * 60)
 post_limiter = SlidingWindowLimiter(30, 60)
-analysis_limiter = SlidingWindowLimiter(20, 60 * 60)
+ai_limiter = SlidingWindowLimiter(60, 60 * 60)
 account_stores: dict[str, AccountStore] = {}
 account_stores_lock = threading.Lock()
 
@@ -349,7 +350,8 @@ def enforce_production_authentication():
         g.current_user = {"email": "local development", "is_admin": True}
 
     if request.method == "POST":
-        supplied_token = request.form.get("csrf_token", "")
+        # JSON endpoints send the token in a header; forms send it as a field.
+        supplied_token = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
         expected_token = session.get("csrf_token", "")
         if not expected_token or not secrets_match(supplied_token, expected_token):
             if request.path == "/login" and supplied_token and same_origin_form_submission():
@@ -376,8 +378,8 @@ def enforce_production_authentication():
                 return too_many_requests(password_reset_ip_limiter)
             reset_key = password_reset_email_key(request.form.get("email", ""))
             g.password_reset_email_throttled = not password_reset_email_limiter.hit(reset_key)
-        if request.form.get("action") == "analyze" and not analysis_limiter.hit(client_key()):
-            return too_many_requests(analysis_limiter)
+        if request.path in ("/api/page", "/api/ask") and not ai_limiter.hit(client_key()):
+            return too_many_requests(ai_limiter)
     return None
 
 
@@ -520,12 +522,147 @@ def build_export_response(result: Any, selected_element: str, export_format: str
     )
 
 
+# ponytail: chats live in process memory, which works because the service runs one instance.
+# Move them to Neon before allowing more than one instance.
+page_chats: dict[str, dict[str, Any]] = {}
+page_chats_lock = threading.Lock()
+PAGE_CHAT_TTL_SECONDS = 2 * 60 * 60
+MAX_PAGE_CHATS = 200
+MAX_QUESTION_CHARS = 500
+
+
+def ai_enabled() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY"))
+
+
+def page_text(soup: Any, url: str) -> str:
+    title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    headings = [heading for heading in scrape_headings(soup) if heading][:80]
+    paragraphs = [paragraph for paragraph in scrape_paragraphs(soup) if paragraph]
+    lines = [f"URL: {url}", f"Title: {title}", "Headings:", *(f"- {heading}" for heading in headings), "", "Text:", *paragraphs]
+    return "\n".join(lines)
+
+
+def page_title(soup: Any, url: str) -> str:
+    title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    return title[:300] or urlsplit(url).hostname or url
+
+
+def save_page_chat(chat: dict[str, Any]) -> None:
+    now = time.time()
+    chat["updated"] = now
+    chat_id = secrets.token_urlsafe(16)
+    with page_chats_lock:
+        for key in [key for key, value in page_chats.items() if now - value["updated"] > PAGE_CHAT_TTL_SECONDS]:
+            del page_chats[key]
+        page_chats.pop(session.get("page_chat_id", ""), None)
+        while len(page_chats) >= MAX_PAGE_CHATS:
+            del page_chats[min(page_chats, key=lambda key: page_chats[key]["updated"])]
+        page_chats[chat_id] = chat
+    session["page_chat_id"] = chat_id
+
+
+def current_page_chat() -> dict[str, Any] | None:
+    with page_chats_lock:
+        chat = page_chats.get(session.get("page_chat_id", ""))
+        if chat is None or time.time() - chat["updated"] > PAGE_CHAT_TTL_SECONDS:
+            return None
+        chat["updated"] = time.time()
+        return chat
+
+
+def public_page_chat(chat: dict[str, Any] | None) -> dict[str, Any] | None:
+    if chat is None:
+        return None
+    return {key: chat[key] for key in ("url", "title", "host", "counts", "messages")}
+
+
+def api_error(message: str, status: int):
+    return {"error": message}, status
+
+
+@app.post("/api/page")
+def api_page():
+    payload = request.get_json(silent=True) or {}
+    url = normalize_url(str(payload.get("url", ""))[:2048])
+    if not url:
+        return api_error("Enter a webpage address, like example.com/article.", 400)
+    try:
+        soup = get_soup(url)
+        if not validate_soup(soup, url):
+            return api_error("This page doesn't have enough text to read. Try an article or documentation page.", 422)
+        chat = {
+            "url": url,
+            "title": page_title(soup, url),
+            "host": urlsplit(url).hostname or "",
+            "counts": fetch_count(soup),
+            "context": page_text(soup, url),
+            "messages": [],
+        }
+    except URLSafetyError as exc:
+        return api_error(str(exc), 400)
+    except requests.RequestException:
+        return api_error("That page couldn't be loaded. Check the address and try again.", 502)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except Exception:
+        app.logger.exception("Page read failed")
+        return api_error("That page couldn't be loaded. Check the address and try again.", 502)
+
+    if ai_enabled():
+        from analyzer import ask_page
+
+        try:
+            overview = ask_page(chat["context"], [])
+            chat["messages"].append({"role": "assistant", "text": overview["answer"], "questions": overview["questions"]})
+        except Exception:
+            app.logger.exception("Page overview failed")
+            chat["messages"].append(
+                {"role": "assistant", "text": "The page loaded, but the overview didn't. Ask a question to try again.", "questions": []}
+            )
+    save_page_chat(chat)
+    return public_page_chat(chat)
+
+
+@app.post("/api/ask")
+def api_ask():
+    payload = request.get_json(silent=True) or {}
+    question = " ".join(str(payload.get("question", "")).split())
+    if not question:
+        return api_error("Type a question about the page.", 400)
+    if len(question) > MAX_QUESTION_CHARS:
+        return api_error(f"Keep questions under {MAX_QUESTION_CHARS} characters.", 400)
+    if not ai_enabled():
+        return api_error("AI answers are off until OPENAI_API_KEY is set on the server.", 503)
+    chat = current_page_chat()
+    if chat is None:
+        return api_error("Read a page first, then ask about it.", 409)
+
+    from analyzer import ask_page
+
+    history = [{"role": message["role"], "content": message["text"]} for message in chat["messages"]]
+    try:
+        reply = ask_page(chat["context"], history, question)
+    except Exception:
+        app.logger.exception("Page question failed")
+        return api_error("The answer didn't come through. Try asking again.", 502)
+    chat["messages"].extend(
+        [
+            {"role": "user", "text": question},
+            {"role": "assistant", "text": reply["answer"], "questions": reply["questions"]},
+        ]
+    )
+    del chat["messages"][:-20]
+    return reply
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     token = csrf_token()
 
     page_data: dict[str, Any] = {
         "url": "",
+        "data_open": False,
         "selected_element": "paragraphs",
         "selected_label": ELEMENT_OPTIONS["paragraphs"],
         "table_index": 1,
@@ -533,13 +670,17 @@ def index():
         "result": None,
         "error": None,
         "validated": False,
-        "analysis": None,
-        "ai_enabled": bool(os.getenv("OPENAI_API_KEY")),
+        "ai_enabled": ai_enabled(),
+        "chat": public_page_chat(current_page_chat()),
         "csrf_token": token,
         "current_user": getattr(g, "current_user", None),
     }
 
+    if page_data["chat"]:
+        page_data["url"] = page_data["chat"]["url"]
+
     if request.method == "POST":
+        page_data["data_open"] = True
         raw_url = request.form.get("url", "")
         selected_element = request.form.get("element", "paragraphs")
         action = request.form.get("action", "inspect")
@@ -583,16 +724,6 @@ def index():
             page_data["result"] = build_result_context(result, selected_element, selected_label, normalized_url)
             if action == "export":
                 return build_export_response(result, selected_element, request.form.get("export_format", "json"))
-            if action == "analyze":
-                if result is None:
-                    page_data["error"] = "There are no results to analyse."
-                else:
-                    analysis_data = result.to_string(index=False) if isinstance(result, pd.DataFrame) else json.dumps(result, ensure_ascii=False)
-                    from analyzer import analyze_scraped_data
-
-                    page_data["analysis"] = analyze_scraped_data(
-                        f"Page: {normalized_url}\nContent type: {selected_label}\n\n{analysis_data}"
-                    )
         except URLSafetyError as exc:
             page_data["error"] = str(exc)
         except requests.RequestException:

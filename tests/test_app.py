@@ -20,13 +20,14 @@ class WebAppTests(unittest.TestCase):
         self.environment_patch.start()
         web_app.app.config.update(TESTING=True)
         web_app.account_stores.clear()
+        web_app.page_chats.clear()
         for limiter in (
             web_app.auth_failure_limiter,
             web_app.login_request_limiter,
             web_app.password_reset_ip_limiter,
             web_app.password_reset_email_limiter,
             web_app.post_limiter,
-            web_app.analysis_limiter,
+            web_app.ai_limiter,
         ):
             limiter.hits.clear()
         self.client = web_app.app.test_client()
@@ -98,7 +99,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(login_response.status_code, 302)
         self.assertEqual(authorized.status_code, 200)
         self.assertIn("Content-Security-Policy", authorized.headers)
-        self.assertIn(b"Private scraping workspace", authorized.data)
+        self.assertIn(b"Ask a webpage anything.", authorized.data)
 
     def test_unauthenticated_background_request_keeps_login_csrf_token(self):
         # Browsers fetch /favicon.ico after rendering /login; that redirect must not rotate the form token.
@@ -232,7 +233,7 @@ class WebAppTests(unittest.TestCase):
     def test_home_page_renders(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Private scraping workspace", response.data)
+        self.assertIn(b"Ask a webpage anything.", response.data)
 
     def test_inspection_renders_results(self):
         with (
@@ -322,21 +323,50 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("attachment;", response.headers["Content-Disposition"])
         self.assertEqual(response.data.decode(), "Name,Work\nAda,Analytical Engine\n")
 
-    def test_ai_analysis_is_explicitly_user_triggered(self):
-        with (
-            patch.object(web_app, "get_soup", return_value=object()),
-            patch.object(web_app, "validate_soup", return_value=True),
-            patch.object(web_app, "fetch_count", return_value={"headings": 1}),
-            patch.object(web_app, "get_element_data", return_value=["A title"]),
-            patch("analyzer.analyze_scraped_data", return_value="A concise analysis."),
-        ):
-            response = self.client.post(
-                "/",
-                data={"url": "example.test", "element": "headings", "action": "analyze", "csrf_token": self.csrf_token},
-            )
+    def test_read_page_gives_overview_with_questions_then_answers_with_history(self):
+        from bs4 import BeautifulSoup
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"A concise analysis", response.data)
+        soup = BeautifulSoup("<title>Cats</title><h1>All about cats</h1><p>Cats purr.</p>", "html.parser")
+        replies = [
+            {"answer": "A page about cats.", "questions": ["Why do cats purr?", "What do cats eat?"]},
+            {"answer": "Cats purr when content.", "questions": ["Do big cats purr?"]},
+        ]
+        headers = {"X-CSRF-Token": self.csrf_token}
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}),
+            patch.object(web_app, "get_soup", return_value=soup),
+            patch.object(web_app, "validate_soup", return_value=True),
+            patch("analyzer.ask_page", side_effect=replies) as ask_page,
+        ):
+            page = self.client.post("/api/page", json={"url": "cats.example.test/about"}, headers=headers)
+            home = self.client.get("/")
+            answer = self.client.post("/api/ask", json={"question": "  Why do cats   purr? "}, headers=headers)
+
+        self.assertEqual(page.status_code, 200)
+        body = page.get_json()
+        self.assertEqual(body["url"], "https://cats.example.test/about")
+        self.assertEqual(body["title"], "Cats")
+        self.assertEqual(body["messages"][0]["questions"], ["Why do cats purr?", "What do cats eat?"])
+        self.assertNotIn("context", body)
+        self.assertIn(b"A page about cats.", home.data)
+        self.assertEqual(answer.get_json(), replies[1])
+        page_text, history, question = ask_page.call_args.args
+        self.assertIn("Cats purr.", page_text)
+        self.assertEqual(history, [{"role": "assistant", "content": "A page about cats."}])
+        self.assertEqual(question, "Why do cats purr?")
+
+    def test_json_endpoints_require_the_csrf_header(self):
+        response = self.client.post("/api/ask", json={"question": "Anything?"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b"Invalid or expired form token", response.data)
+
+    def test_asking_before_reading_a_page_explains_the_next_step(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            response = self.client.post("/api/ask", json={"question": "Anything?"}, headers={"X-CSRF-Token": self.csrf_token})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json(), {"error": "Read a page first, then ask about it."})
 
     def test_login_request_limit_applies_even_when_attempts_use_different_emails(self):
         store = AccountStore("sqlite:///:memory:")

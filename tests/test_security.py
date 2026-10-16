@@ -28,7 +28,7 @@ class SecurityRegressionTests(unittest.TestCase):
             web_app.password_reset_ip_limiter,
             web_app.password_reset_email_limiter,
             web_app.post_limiter,
-            web_app.analysis_limiter,
+            web_app.ai_limiter,
         ):
             limiter.hits.clear()
         self.client = web_app.app.test_client()
@@ -148,11 +148,16 @@ class SecurityRegressionTests(unittest.TestCase):
         response = self.client.post("/", data=data, headers={"X-Forwarded-For": "198.51.100.250"})
         self.assertEqual(response.status_code, 429)
 
-    def test_ai_analysis_has_its_own_tighter_limit(self):
-        data = {"url": "", "action": "analyze", "csrf_token": self.csrf_token}
-        for _ in range(web_app.analysis_limiter.limit):
-            self.client.post("/", data=data)
-        self.assertEqual(self.client.post("/", data=data).status_code, 429)
+    def test_ai_endpoints_have_their_own_limit(self):
+        headers = {"X-CSRF-Token": self.csrf_token}
+        with (
+            patch.object(web_app, "ai_limiter", web_app.SlidingWindowLimiter(2, 60 * 60)),
+            patch.object(web_app, "post_limiter", web_app.SlidingWindowLimiter(100, 60)),
+        ):
+            statuses = [self.client.post("/api/ask", json={"question": ""}, headers=headers).status_code for _ in range(3)]
+            page_status = self.client.post("/api/page", json={"url": ""}, headers=headers).status_code
+        self.assertEqual(statuses, [400, 400, 429])
+        self.assertEqual(page_status, 429)
 
     def test_failed_logins_are_throttled_per_client_and_email(self):
         environment = {

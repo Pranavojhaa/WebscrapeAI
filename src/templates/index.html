@@ -2,168 +2,169 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebScrapeAI</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f6f7f9">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>{{ chat.title ~ " – WebScrapeAI" if chat else "WebScrapeAI" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body>
-    <main class="page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+        <a class="wordmark" href="{{ url_for('index') }}" translate="no">WebScrapeAI</a>
         {% if current_user %}
-            <nav class="private-nav" aria-label="Private workspace account">
-                <span>Signed in as <strong>{{ current_user.email }}</strong></span>
+            <nav class="account" aria-label="Account">
+                <span class="account-email" translate="no">{{ current_user.email }}</span>
                 {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">Manage accounts</a>{% endif %}
                 <form method="post" action="{{ url_for('logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="link-button" type="submit">Sign out</button>
+                    <button class="text-button" type="submit">Sign out</button>
                 </form>
             </nav>
         {% endif %}
-        <section class="hero">
-            <p class="eyebrow">WebScrapeAI</p>
-            <h1>Private scraping workspace</h1>
-            <p class="intro">
-                Enter a public webpage URL, choose a content type, and inspect, analyse, or export the results.
-            </p>
-        </section>
+    </header>
 
-        <section class="card">
-            <form method="post" class="form-grid">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="field field-wide">
-                    <label for="url">Website URL</label>
-                    <input
-                        id="url"
-                        name="url"
-                        type="text"
-                        placeholder="example.com"
-                        value="{{ url }}"
-                    >
-                </div>
-
-                <div class="field">
-                    <label for="element">Inspect</label>
-                    <select id="element" name="element">
-                        {% for value, label in element_options.items() %}
-                            <option value="{{ value }}" {% if value == selected_element %}selected{% endif %}>
-                                {{ label }}
-                            </option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="field">
-                    <label for="table_index">Table number</label>
-                    <input
-                        id="table_index"
-                        name="table_index"
-                        type="number"
-                        min="1"
-                        value="{{ table_index }}"
-                    >
-                </div>
-
-                <div class="field field-wide">
-                    <button type="submit" name="action" value="inspect">Inspect Page</button>
-                </div>
+    <main id="main" class="shell">
+        <section class="intake" aria-labelledby="intake-title">
+            <h1 id="intake-title">Ask a webpage anything.</h1>
+            <p class="lede">Paste a public page. WebScrapeAI reads it, sums it up, and suggests questions you can ask next.</p>
+            <form id="read-form" class="address-bar" novalidate>
+                <label class="visually-hidden" for="page-url">Webpage address</label>
+                <input
+                    id="page-url"
+                    name="url"
+                    type="text"
+                    inputmode="url"
+                    autocomplete="url"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="en.wikipedia.org/wiki/Web_scraping…"
+                    value="{{ chat.url if chat else '' }}"
+                    {% if not chat %}autofocus{% endif %}
+                >
+                <button id="read-button" type="submit" class="primary-button">
+                    <span class="spinner" aria-hidden="true"></span>
+                    <span>Read page</span>
+                </button>
             </form>
-
-            {% if error %}
-                <div class="message error">{{ error }}</div>
+            <p id="read-error" class="field-error" role="alert" hidden></p>
+            {% if not ai_enabled %}
+                <p class="note">AI answers are off until <code translate="no">OPENAI_API_KEY</code> is set on the server. You can still read pages and export their data.</p>
             {% endif %}
         </section>
 
-        {% if summary %}
-            <section class="card">
-                <h2>Page Summary</h2>
-                <div class="stats">
-                    {% for key, value in summary.items() %}
-                        <article class="stat">
-                            <span class="stat-label">{{ key }}</span>
-                            <strong class="stat-value">{{ value }}</strong>
-                        </article>
-                    {% endfor %}
+        <section id="conversation" class="conversation" aria-labelledby="source-title" {% if not chat %}hidden{% endif %}>
+            <header class="source">
+                <p class="source-host" id="source-host" translate="no"></p>
+                <h2 class="source-title" id="source-title"></h2>
+                <ul class="source-counts" id="source-counts" aria-label="What the page contains"></ul>
+                <a class="source-link" id="source-link" href="#" target="_blank" rel="noreferrer">Open page</a>
+            </header>
+
+            <ol class="thread" id="thread" aria-live="polite"></ol>
+
+            {% if ai_enabled %}
+                <form id="ask-form" class="ask-bar" novalidate>
+                    <label class="visually-hidden" for="question">Question about this page</label>
+                    <input id="question" name="question" type="text" maxlength="500" autocomplete="off" placeholder="Ask about this page…">
+                    <button id="ask-button" type="submit" class="primary-button">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span>Ask</span>
+                    </button>
+                </form>
+                <p id="ask-error" class="field-error" role="alert" hidden></p>
+            {% endif %}
+        </section>
+
+        <details id="data-panel" class="data-panel" {% if data_open %}open{% endif %} {% if not chat and not data_open %}hidden{% endif %}>
+            <summary>Extracted data</summary>
+            <form method="post" action="{{ url_for('index') }}" class="data-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="url" id="data-url" value="{{ url }}">
+                <div class="field">
+                    <label for="element">Show</label>
+                    <select id="element" name="element">
+                        {% for value, label in element_options.items() %}
+                            <option value="{{ value }}" {% if value == selected_element %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
-            </section>
-        {% endif %}
+                <div class="field field-narrow">
+                    <label for="table_index">Table number</label>
+                    <input id="table_index" name="table_index" type="text" inputmode="numeric" value="{{ table_index }}">
+                </div>
+                <button type="submit" name="action" value="inspect" class="secondary-button">Show data</button>
+            </form>
 
-        {% if result %}
-            <section class="card">
-                <h2>{{ result.label }} Results</h2>
-                <p class="result-count">Items found: {{ result.count }}</p>
+            {% if error %}
+                <p class="field-error" role="alert">{{ error }}</p>
+            {% endif %}
 
-                {% if result.kind == "table" %}
-                    <div class="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    {% for header in result.headers %}
-                                        <th>{{ header }}</th>
+            {% if result %}
+                <div class="data-result">
+                    <p class="data-count">{{ result.count }} {{ result.label|lower }}</p>
+
+                    {% if result.kind == "table" %}
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>{% for header in result.headers %}<th scope="col">{{ header }}</th>{% endfor %}</tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in result.rows %}
+                                        <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
                                     {% endfor %}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for row in result.rows %}
-                                    <tr>
-                                        {% for cell in row %}
-                                            <td>{{ cell }}</td>
-                                        {% endfor %}
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% elif result.kind == "links" %}
-                    <ul class="result-list">
-                        {% for item in result['items'] %}
-                            <li>
-                                <span>{{ item.text or "Untitled link" }}</span>
-                                {% if item.href.startswith(("http://", "https://")) %}
-                                    <a href="{{ item.href }}" target="_blank" rel="noreferrer">{{ item.href }}</a>
-                                {% else %}
-                                    <span>{{ item.href }}</span>
-                                {% endif %}
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% elif result.kind == "images" %}
-                    <ul class="image-results">
-                        {% for item in result['items'] %}
-                            <li>
-                                {% if item.url %}
-                                    <a href="{{ item.url }}" target="_blank" rel="noreferrer">
-                                        {% if item.preview %}
-                                            <img src="{{ item.url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
-                                        {% endif %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% elif result.kind == "links" %}
+                        <ul class="data-list">
+                            {% for item in result['items'] %}
+                                <li>
+                                    <span>{{ item.text or "Untitled link" }}</span>
+                                    {% if item.href.startswith(("http://", "https://")) %}
+                                        <a href="{{ item.href }}" target="_blank" rel="noreferrer">{{ item.href }}</a>
+                                    {% else %}
+                                        <span class="data-muted">{{ item.href }}</span>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% elif result.kind == "images" %}
+                        <ul class="image-results">
+                            {% for item in result['items'] %}
+                                <li>
+                                    {% if item.url %}
+                                        <a href="{{ item.url }}" target="_blank" rel="noreferrer">
+                                            {% if item.preview %}
+                                                <img src="{{ item.url }}" alt="" width="160" height="120" loading="lazy" referrerpolicy="no-referrer">
+                                            {% endif %}
+                                            <span>{{ item.label }}</span>
+                                        </a>
+                                    {% else %}
                                         <span>{{ item.label }}</span>
-                                    </a>
-                                {% else %}
-                                    <span>{{ item.label }}</span>
-                                {% endif %}
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% elif result.kind == "list" %}
-                    <ul class="result-list">
-                        {% for item in result['items'] %}
-                            <li>{{ item.content }}</li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p>No results were found for this selection.</p>
-                {% endif %}
-            </section>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% elif result.kind == "list" %}
+                        <ul class="data-list">
+                            {% for item in result['items'] %}<li>{{ item.content }}</li>{% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="data-muted">Nothing of this type was found on the page. Try another option above.</p>
+                    {% endif %}
+                </div>
 
-            {% if validated %}
-                <section class="card">
-                    <h2>Use these results</h2>
-                    <form method="post" class="form-grid">
+                {% if validated %}
+                    <form method="post" action="{{ url_for('index') }}" class="data-form export-form">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <input type="hidden" name="url" value="{{ url }}">
                         <input type="hidden" name="element" value="{{ selected_element }}">
                         <input type="hidden" name="table_index" value="{{ table_index }}">
-
                         <div class="field">
-                            <label for="export_format">Export format</label>
+                            <label for="export_format">Format</label>
                             <select id="export_format" name="export_format">
                                 {% if result.kind == "table" %}
                                     <option value="csv">CSV</option>
@@ -175,29 +176,13 @@
                                 {% endif %}
                             </select>
                         </div>
-                        <div class="field">
-                            <label>&nbsp;</label>
-                            <button type="submit" name="action" value="export">Download results</button>
-                        </div>
-                        <div class="field field-wide">
-                            {% if ai_enabled %}
-                                <p class="privacy-note">AI analysis sends the selected extraction to OpenAI only when you choose this action.</p>
-                                <button type="submit" name="action" value="analyze">Analyse with AI</button>
-                            {% else %}
-                                <p class="privacy-note">AI analysis is off. Set OPENAI_API_KEY on the server to enable it.</p>
-                            {% endif %}
-                        </div>
+                        <button type="submit" name="action" value="export" class="secondary-button">Download results</button>
                     </form>
-                </section>
+                {% endif %}
             {% endif %}
-        {% endif %}
-
-        {% if analysis %}
-            <section class="card">
-                <h2>AI Analysis</h2>
-                <p class="analysis-copy">{{ analysis }}</p>
-            </section>
-        {% endif %}
+        </details>
     </main>
+
+    <script type="application/json" id="page-state">{{ chat|tojson }}</script>
 </body>
 </html>
